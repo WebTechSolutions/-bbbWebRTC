@@ -1,0 +1,68 @@
+<!DOCTYPE HTML>
+<html lang="en-US">
+   <head>
+      <!--  configuration variables -->
+      <script>
+      var QueryString = function () {
+              var query_string = {};
+              var query = window.location.search.substring(1);
+              var vars = query.split("&");
+              for (var i=0;i<vars.length;i++) {
+                var pair = vars[i].split("=");
+                if (typeof query_string[pair[0]] === "undefined") {
+                  query_string[pair[0]] = decodeURIComponent(pair[1]);
+                    } else if (typeof query_string[pair[0]] === "string") {
+                  var arr = [ query_string[pair[0]],decodeURIComponent(pair[1]) ];
+                  query_string[pair[0]] = arr;
+                    } else {
+                  query_string[pair[0]].push(decodeURIComponent(pair[1]));
+                }
+              } 
+                return query_string;
+            }();
+         var room = QueryString.room
+         var name = 'Nithin';
+      </script>
+      <!--      -->
+      <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+      <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+      <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+      <link rel="stylesheet" type="text/css" href="css/bbbstyle.css">
+   </head>
+   <body>
+      <header>
+         <h2>Demo Meeting</h2>
+      </header>
+      <button data-toggle="modal" data-target="#myModal" class="showconf" onclick="showconf()">Show Shaired Camera</button>
+      <button class="partbut showconf">Participants</button>
+      <button style="display: none;" onclick="leave()">leave video conference</button>
+      <div id="user-contents">
+         <ul>
+            <li>Jam<div style="height: 30px;width: auto;float: left;"><button id="sh-cam" onclick="start()" style="z-index: 99999;">Share Cam</button><button id="dis-cam" onclick="stop()">Disable Cam</button></div></li>
+            <li>Nithin</li>
+            <li>Vishnu</li>
+            <li>Arun</li>
+         </ul>
+      </div>
+      <div id="iframe-div" class="iframe-div" >
+      </div>
+      <!-- Modal -->
+      <div class="modal fade" id="myModal" role="dialog">
+         <div class="modal-dialog">
+            <!-- Modal content-->
+            <div class="modal-content">
+               <div class="modal-header">
+                  <button type="button" class="close" data-dismiss="modal">&times;</button>
+                  <h4 class="modal-title">Published Cams</h4>
+               </div>
+               <div class="modal-body">
+               </div>
+               <div class="modal-footer">
+                  <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+               </div>
+            </div>
+         </div>
+      </div>
+   </body>
+   <script src="js/main.js" type="text/javascript"></script>
+</html>

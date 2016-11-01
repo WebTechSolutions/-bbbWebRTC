@@ -1,0 +1,60 @@
+#user-contents {
+    background-color: #34495E;
+    width: 250px;
+    height: 100%;
+    position: absolute;
+}
+body {
+    margin: 0px;
+}
+header {
+    width: 100%;
+    background-color: #3e5c6e;
+    height: 80px;
+    border-bottom: 1px solid #d5d5d5;
+    vertical-align: middle;
+}
+h2 {
+    padding: 25px;
+    color: #fff;
+    margin: 0px;
+}
+.showconf {
+    background-color: #fff;
+    border: 0 none;
+    font-size: 12px;
+    height: 38px;
+    left: 94px;
+    position: absolute;
+    top: 81px;
+    width: 155px;
+    z-index: 99;
+    cursor: pointer;
+}
+.partbut {
+    left: 2px !important;
+    width: 90px;
+    cursor: pointer;
+}
+#user-contents ul {
+    position: absolute;
+    top: 30px;
+    color: #eee;
+    padding-left: 10px;
+}
+#user-contents ul li {
+    display: block;
+    margin-top: 10px;
+}
+#user-contents ul li button {
+    left: 121px;
+    position: absolute;
+    width: 113px;
+    color: blue;
+    border-width: 1px;
+    border-color: blue;
+    background-color: #fff;
+}
+iframe {
+    border-width: 0px;
+}
