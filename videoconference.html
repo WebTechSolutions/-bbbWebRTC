@@ -1,0 +1,100 @@
+<!DOCTYPE HTML>
+<html lang="en-US">
+<head>
+<link rel="stylesheet" href="assets/css/style.css?t=2" />
+<link rel="stylesheet" type="text/css" href="assets/css/bootstrap.css">
+<link rel="stylesheet" href="assets/css/sweetalert.css">
+<link href="assets/css/font-awesome.css" rel="stylesheet" />
+<link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+<link rel="stylesheet" type="text/css" href="assets/css/bootstrap.css">
+<link rel="stylesheet" type="text/css" href="assets/css/perfect-scrollbar.min.css">
+<script src="assets/js/sweetalert.js"></script>
+<script src="assets/js/jquery.min.js"></script> 
+<style>
+ul li{list-style:none;}
+ul.list-group.customlist{margin-top:20px;}
+li.list-group-item.customfields{border:none; margin:0 auto;}
+.main-div{position:absolute;left:10px;width:200px;top:100px;bottom:50px;}
+.list-div{width:165px;height:350px;overflow:auto;overflow-x:hidden;border:1px solid #ccc;}
+.list-head{margin-top:10px;width:165px;border: 1px solid #ccc;height: 25px;border-bottom:0;}
+.icon{width:15px;margin-left:30px;}
+</style>
+<script src="CONFIG.js"></script>
+  <script>
+       var QueryString = function () {
+              var query_string = {};
+              var query = window.location.search.substring(1);
+              var vars = query.split("&");
+              for (var i=0;i<vars.length;i++) {
+                var pair = vars[i].split("=");
+                if (typeof query_string[pair[0]] === "undefined") {
+                  query_string[pair[0]] = decodeURIComponent(pair[1]);
+                    } else if (typeof query_string[pair[0]] === "string") {
+                  var arr = [ query_string[pair[0]],decodeURIComponent(pair[1]) ];
+                  query_string[pair[0]] = arr;
+                    } else {
+                  query_string[pair[0]].push(decodeURIComponent(pair[1]));
+                }
+              } 
+                return query_string;
+            }();
+	     var name 	          =   QueryString.name;
+       var node_url         =   NODE_URL;
+       var ROOM_NODE_URL    =   ROOM_NODE_URL; 
+       var role             =   'org';
+       var room             =   QueryString.room
+       var userId           =   QueryString.userId;
+       var userName         =   name.slice(0,7);
+       var mode             =   'presenter';
+       var webinar          =   '0';
+       var record           =   '0';
+       var socketId         =   '0';
+       var layout;
+    </script>
+</head>
+	 <body>
+   <section>
+      <header>
+        <div class="heading">Video Conference App</div>
+      </header>
+    </section>
+   
+
+ <div class="main-div">
+ 		<div>
+          <button id="share_cam" disabled="disabled" class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown" style="margin-top:10px;width:160px">Share My Cam</button><br>
+           <button disabled="disabled" id="stop_cam" class="btn btn-danger dropdown-toggle" type="button" data-toggle="dropdown"style="margin-top:10px;width:160px">Stop Camera Sharing</button><br>
+           <button id="share_screen" disabled="disabled" class="btn btn-primary dropdown-toggle" type="button" data-toggle="dropdown" style="margin-top:10px;width:160px">Share My Screen</button><br>
+          <button disabled="disabled" id="stop_screen" class="btn btn-danger dropdown-toggle" type="button" data-toggle="dropdown"style="margin-top:10px;width:160px">Stop screen Sharing</button>
+           </div>
+           
+        <div class="list-head"> <b style="margin-left:5px">Participants</b><img src="assets/images/users.png" class="icon" width="20px"></div>
+        	<div class="list-div">
+          
+                    
+            </div>  
+         </div>  
+
+    <div id="layout"></div>  
+   
+   
+   
+ 
+    <footer>
+        <span id="live-lab" class="live off">OFFLINE</span>
+        <span id="indication" class="online offline"></span>
+        <span id="elapsedtime"></span>
+        <div class="stop-session" id="stop_session" onClick="leaveSession()">Leave Session</div>
+    </footer>
+    
+	</body>
+ </html>
+
+<script src="assets/js/socket.io.js"></script>
+<script src="assets/js/adapter.js?t=5"></script>
+<script src="assets/js/kurento-utils.js?t=36"></script>
+<script src="assets/js/conferenceroom.js?t=6765"></script>
+<script src="assets/js/participants.js?t=29"></script>
+<script src="assets/js/bootstrap.js"></script>
+<script src="assets/js/perfect-scrollbar.min.js"></script> 
+

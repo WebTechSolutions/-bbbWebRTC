@@ -1,0 +1,2952 @@
+        var QueryString = function() {
+            var query_string = {};
+            var query = window.location;
+            query = query.toString();
+            query = query.split('?');
+          if(query[1]){
+            query = query[1];
+            var vars = query.split("&");
+            for (var i = 0; i < vars.length; i++) {
+                var pair = vars[i].split("=");
+                if (typeof query_string[pair[0]] === "undefined") {
+                    query_string[pair[0]] = decodeURIComponent(pair[1]);
+                } else if (typeof query_string[pair[0]] === "string") {
+                    var arr = [query_string[pair[0]], decodeURIComponent(pair[1])];
+                    query_string[pair[0]] = arr;
+                } else {
+                    query_string[pair[0]].push(decodeURIComponent(pair[1]));
+                }
+            }
+            return query_string;
+           }else{
+            return false;
+           }
+        }();
+        var authenticated = 0;
+        var role       = 'normal';
+        var room       = localStorage.getItem("room");
+        var userName   = localStorage.getItem("name");
+        var userEmail  = localStorage.getItem("email");
+        var userPhone  = localStorage.getItem("phone");
+        var pin        = localStorage.getItem("pin");
+        var userType   = '';
+        var mode       = 'viewer';
+        var webinar    =  '0';
+        var myUserId   = '0';
+        var enableChat = 'true';
+        var allowInvite= 'true';
+        var expiresettings = 'true';
+        var title      = '';
+        
+        if (QueryString.room) {
+            var room   = QueryString.room;
+        }
+        if (QueryString.name) {
+            userName   = QueryString.name;
+        }
+        if (QueryString.email) {
+            userEmail   = QueryString.email;
+        }
+        if (QueryString.mode) {
+            mode       = QueryString.mode;
+        }
+        if (QueryString.webinar) {
+            webinar    = QueryString.webinar;
+        }
+        if (QueryString.pin) {
+            pin        = QueryString.pin;
+        }
+        
+        var inviteMsg = mail_invite_msg;
+        var inviteUrl = base_path+'?mode=viewer&webinar=' + webinar + '&name=guest&room=' + room+'&pin='+pin;
+        var record = '0';
+        var socketId = '0';
+        var totalPart = 0;
+        var mozScreenshareAvailable = 0;
+        var layout;
+        var stopSession = 0;
+        var localStorageArray = {};
+        var session_time = 0;
+        var video_lock_array = {};
+        var audio_lock_array = {};
+        var setViewBlock = 0;
+        var switching    = false;
+        var alreadyConnected = 0;
+        var focus = 1;
+        function onContinue(){
+            $('#settings_if').hide();
+        }
+        /*
+        socket script started
+        */
+        function connectSocket() {
+            if(stopSession == 1){
+                if(socket)
+                    socket.disconnect();
+               return;
+            }
+            $('.hardware_popup').remove();
+            $('.connecting').show();
+            socket = io.connect(node_url);
+            socket.on("connect", function(id) {
+                $('#mainParent').removeClass('opacity0');
+                if (alreadyConnected == 1) {
+                    leaveRoom();
+                }
+                register(role);
+                alreadyConnected = 1;
+            });
+            socket.on('disconnect', function() {
+                //alert('2');
+                if(stopSession == 0)
+                   showNotifiction('net connection failure reconnecting....');
+                setTimeout(connectSocket, 2000);
+
+                //$("#lab").html('offline');
+
+            });
+            /**
+             * Register to a romm
+             * @param callback for getting socket id
+             */
+            socket.on("id", function(id) {
+                sessionId = id;
+                screensessionId = id + '_screen';
+                socketId = id;
+                //$('#myvideo').html('<video id="video-'+socketId+'"></video>');
+            });
+            /**
+             * Invoke from nodejs server on each event triggers
+             * @param message
+             */
+            socket.on("message", function(message) {
+                switch (message.id) {
+                    case "registered":
+                        joinRoom(room, message.role);
+                        break;
+                    case "existingParticipants":
+                        if (message.role == 'screen') {
+                            onExistingParticipants(message, screensessionId, screensessionId, 'screen',message.recording);
+                        } else {
+                            onExistingParticipants(message, sessionId, socketId, role,message.recording);
+                        }
+                        break;
+                    case "receiveVideoAnswer":
+                        onReceiveVideoAnswer(message);
+                        break;
+                    case "newParticipantArrived":
+                        onNewParticipant(message);
+                        break;
+                    case "participantLeft":
+                        onParticipantLeft(message);
+                        break;
+                    case "onExistingUserForConnectionCheck":
+                        onExistingUserForConnectionCheck(message);
+                        break;
+                    case "iceCandidate":
+                        var participant = participants[message.sessionId];
+                        if (participant != null) {
+                            participant.rtcPeer.addIceCandidate(message.candidate, function(error) {
+                                if (error) {
+                                    if (message.sessionId === sessionId) {
+                                        console.log("Error adding candidate to self : " + error);
+                                    } else {
+                                        console.log("Error adding candidate : " + error);
+                                    }
+                                }
+                            });
+                        } else {
+                            console.log('still does not establish rtc peer for : ' + message.sessionId);
+                        }
+                        break;
+                    case 'onReceiveSendToOne':
+                        onReceiveSendToOne(message);
+                        break;
+                    case 'countExceed':
+                        onCountExceed();
+                        break;
+                    case 'roomerror':
+                        roomError();
+                        break;
+                    case 'onReceiveSendToAll':
+                        onReceiveSendToAll(message);
+                        break;
+                    case "userDisconnected":
+                        var strmId = message.streamId;
+                        if (strmId == socketId) {
+                            leaveRoom();
+                            setTimeout(function() {
+                                register(role);
+                            }, 2000);
+                        } else {
+
+                            $('#video-' + strmId).remove();
+                            $('#user-' + strmId).remove();
+                            totalPart = $('#userList').children('li').length;
+                            $('#part-count').html(totalPart);
+                            $('#chatuser-' + strmId).remove();
+                            layout();
+                        }
+                        break;
+                    case 'onInitialTime':
+                        //message.time 
+                        break;
+                    case 'onInitialObj':
+                        loadInitialData(message.data);
+                        break;
+                    case 'onReceiveRollchange':
+                          onReceiveRollchange(message);
+                        break;
+                    default:
+                        console.log("Unrecognized message: " + message.id);
+                }
+            });
+        }
+        $('document').ready(function() {
+            var data = {};
+                data.conference_id = room;
+            $.ajax({
+                    url: node_url+"/rest/title",
+                    method: "POST",
+                    data: JSON.stringify(data),
+                    dataType: 'json',
+                    success: function(d) {
+                       var res = d;
+                       title          = res.title;
+                       $('.title').html(title);
+                       
+                    }
+            });
+            $('#cust-login,#cust-login').click(function(){
+                 window.location = folder_path+"dashboard";
+                 //alert(folder_path+"dashboard");
+            })
+      
+            $('#name-usr').val(userName);
+            $('#email-usr').val(userEmail);
+            $('#ph-usr').val(userPhone);
+            //$('#pin-usr').val(room);
+            $('#meet-id').val(room);
+            $('#pin-usr').val(pin);
+            
+            $('#meeting_id_submit').click(function(){
+                 var meeting_id     = $('#meet-id').val();
+                 var name_of_user   = $('#name-usr').val();
+                 var email_of_user  = $('#email-usr').val();
+                 var ph_of_user     = $('#ph-usr').val();
+                 var pin_of_user    = $('#pin-usr').val();
+                 var error_msg      = 0;
+                 if(name_of_user == ''){
+                     error_msg = 'Name is mandatory';
+                 }else if(meeting_id == ''){
+                    error_msg = 'Meeting ID is mandatory';
+                 }else if(pin_of_user == ''){
+                    error_msg = 'Pin is mandatory';
+                 }
+                 if(name_of_user == '' && meeting_id == ''){
+                    error_msg = 'Meeting ID and Name is mandatory';
+                 }
+                 if(pin_of_user == '' && meeting_id == ''){
+                    error_msg = 'Meeting ID and Pin is mandatory';
+                 }
+                 if(name_of_user == '' && pin_of_user == ''){
+                    error_msg = 'Name and Pin is mandatory';
+                 }
+                 if(name_of_user == '' && meeting_id == '' && pin_of_user == ''){
+                    error_msg = 'Meeting ID,Name and Pin is mandatory';
+                 }
+                 if(name_of_user == '' && meeting_id == '' && pin_of_user == '' && email_of_user == ''){
+                    error_msg = 'Meeting ID,Name,Email and Pin is mandatory';
+                 }else if(email_of_user == ''){
+                    error_msg = 'Email is mandatory';
+                 }
+                 if(error_msg != 0){
+                    $('.err-msg').html(error_msg);
+                    $('.err-msg').fadeIn();
+                    setTimeout(function hideErrMsg(){
+                                $('.err-msg').fadeOut();
+                            },3000);
+                    return;
+                 }
+                 room               = meeting_id;
+                 userName           = name_of_user;
+                 inviteUrl = base_path+'?mode=viewer&webinar=' + webinar + '&name=guest&room=' + room+'&pin='+pin;
+                 $('.title-id').html(' / '+meeting_id);
+                 //879875
+                 $('#invite-msg').val(inviteMsg + '  ' + inviteUrl);
+                 $('#link-hidden').val(inviteUrl);
+                 $.ajax({
+                    url: node_url+"/rest/check/"+meeting_id+"/"+pin_of_user+"/"+email_of_user+"/"+expiresettings,
+                    method: "GET",
+                    success: function(d) {
+                        var resu = JSON.parse(d);
+                            d    = resu.code; 
+                        if(d == '2'){
+                            $('.err-msg').html('You are not authorized to join this meeting');
+                            $('.err-msg').fadeIn();
+                            setTimeout(function hideErrMsg(){
+                                $('.err-msg').fadeOut();
+                            },3000);
+                        }else if(d == '3'){
+                            $('.err-msg').html('Host not started the meeting');
+                            $('.err-msg').fadeIn();
+                            setTimeout(function hideErrMsg(){
+                                $('.err-msg').fadeOut();
+                            },3000);
+
+                        }else if(d == '4'){
+                            $('.err-msg').html('Meeting time not arrived have to wait '+resu.waittime+' minutes');
+                            $('.err-msg').fadeIn();
+                            setTimeout(function hideErrMsg(){
+                                $('.err-msg').fadeOut();
+                            },3000);
+
+                        }else if(d == '5'){
+                            $('.err-msg').html('This meeting is expired');
+                            $('.err-msg').fadeIn();
+                            setTimeout(function hideErrMsg(){
+                                $('.err-msg').fadeOut();
+                            },3000);
+
+                        }else if(d == '1'){
+                            var result = resu.data;
+                            var result_email = '';
+                            if(result.hasOwnProperty('email')){
+                                result_email = result.email;
+                            }
+                            if(result.hasOwnProperty('host_email')){
+                                result_email = result.host_email;
+                            }
+                            if(resu.hasOwnProperty('invite')){
+                                allowInvite = resu.invite;
+                            }
+                            if(resu.hasOwnProperty('chat')){
+                                enableChat = resu.chat;
+                            }
+                            if(resu.hasOwnProperty('expire')){
+                                 expiresettings= resu.expire;
+                            }
+                            if(allowInvite == 'false'){
+                              $('.invite-people').remove();
+                            }
+                            if(result_email != '' && (result_email == email_of_user)){
+                                userEmail     = result_email;
+                                myUserId      = result.participant_id;
+                                if(result.type == 'G'){
+                                    mode = 'viewer';
+                                }
+                                if(result.type == 'C'){
+                                    mode = 'viewer';
+                                }
+                                if(result.type == 'H'){
+                                    mode = 'presenter';
+                                }
+                                if (mode != 'presenter') {
+                                    $('.hideforviewer').hide();
+                                    $('#endMsg').html('Are you sure to leave from the current meeting ?');
+                                    $('.viewerdropht').css('top', '-110px');
+                                    $('#share_conf').hide();
+                                } else {
+                                    $('#leaveMeeting').hide();
+                                    $('#endMsg').html('Are you sure to end this meeting ? , so that all users will be disconnected from the room');
+                                }
+                                
+
+                                authenticated = 1;
+                                $('.wraper-auth').remove();
+                                if(allowInvite == 'false'){
+                                  $('.invite-people').remove();
+                                }
+                                connectSocket();
+                                if (typeof(Storage) !== "undefined") {
+                                localStorage.setItem("name", name_of_user);
+                                localStorage.setItem("email", email_of_user);
+                                localStorage.setItem("room", meeting_id);
+                                localStorage.setItem("pin", pin_of_user);
+                                localStorage.setItem("phone", ph_of_user);
+
+                               }
+                            }
+                            
+                        }
+                      
+                    }
+
+                });
+
+            });
+            
+
+            
+            if (webinar == '1') {
+                $('#layout').hide();
+                if(mode == 'viewer'){
+                   $('#settings_if').remove();
+                }
+                
+            }
+
+            var layoutEl = document.getElementById("layout");
+            layout = initLayoutContainer(layoutEl, {
+                animate: {
+                    duration: 500,
+                    easing: "swing"
+                },
+                fixedRatio:"3/4"
+            }).layout;
+            setView();
+            var resizeTimeout;
+            window.onresize = function() {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(function() {
+                    layout();
+                    setView();
+                }, 20);
+            };
+
+            $('.stop-video').click(function() {
+                var stat = $('.videobutton_mtxt').html();
+                var obj = {};
+                obj['method'] = 'video_ctrl';
+                obj['id'] = socketId;
+                var allow = 1;
+                if (stat == 'Stop Video') {
+                    $('.videobutton_mtxt,.mobvidtxt').html('Start Video');
+                    controlVideo('false', socketId);
+                    obj['status'] = 'false';
+                    showNotifiction('Your video is now hidden to all users');
+                } else {
+
+                    if (video_lock_array.hasOwnProperty(socketId)) {
+                        if (video_lock_array[socketId] == 'false') {
+                            allow = 0;
+                        }
+                    }
+                    if (allow == 1) {
+                        $('.videobutton_mtxt,.mobvidtxt').html('Stop Video');
+                        controlVideo('true', socketId);
+                        obj['status'] = 'true';
+                        showNotifiction('Your video is now enable to all users');
+                    } else {
+                        showNotifiction('You cannot enable video this time');
+                    }
+                }
+                if (allow == 1)
+                    sendToAll(JSON.stringify(obj));
+            });
+            $('.mute-audio').click(function() {
+                var stat = $('.microphone_mtxt').html();
+                var obj = {};
+                obj['method'] = 'audio_ctrl';
+                obj['id'] = socketId;
+                var allow = 1;
+                if (stat == 'Mute') {
+                    $('.microphone_mtxt,.mobtxtval').html('Un Mute');
+                    obj['status'] = 'false';
+                    showNotifiction('Your audio is muted succesfully');
+                } else {
+
+                    if (audio_lock_array.hasOwnProperty(socketId)) {
+                        if (audio_lock_array[socketId] == 'false') {
+                            allow = 0;
+                        }
+                    }
+                    if (allow == 1) {
+                        $('.microphone_mtxt,.mobtxtval').html('Mute');
+                        obj['status'] = 'true';
+                        showNotifiction('Your audio is unmuted succesfully');
+                    } else {
+                        showNotifiction('You cannot enable audio this time');
+                    }
+                }
+                if (allow == 1)
+                    sendToAll(JSON.stringify(obj));
+            });
+            $("#messageInput").keypress(function(event) {
+                if (event.keyCode == 13) {
+
+                    var msg = $('#messageInput').val();
+                    $('#messageInput').val('');
+                    if (msg != '') {
+                        var toid = $('#toid').attr("data-toid");
+                        //function loadChat(toLabal,To,msg,type,toId,send){
+                        var to = 'Every one';
+                        var type = 'public';
+                        if (toid != 'public') {
+                            to = $('#toname').html();
+                            type = 'private';
+                        }
+                        loadChat('To', to, msg, type, toid, true);
+                    }
+                    event.preventDefault();
+                }
+
+            });
+            $(".hide-right-pane").click(function() {
+                $(this).hide();
+                $(".show-right-pane").show();
+                $("#right-pane").hide();
+                $("#left-pane").addClass("full-screen");
+                $('.chatli').show();
+                $('.partButton').show();
+                init();
+                layout();
+            });
+            $(".show-right-pane,.partButton,.chatButton,.partButtonMob,.chatButtonMob").click(function() {
+                $('.show-right-pane').hide();
+                $(".hide-right-pane").show();
+                $("#right-pane").show();
+                $("#left-pane").removeClass("full-screen");
+                $('.chatli').hide();
+                $('.chat-count').html('0')
+                $('.partButton').hide();
+                init();
+                layout();
+            });
+            $('.share_board').click(function() {
+                onModuleChange('wb', true);
+                var historyArray = {};
+                historyArray['action'] = 'module';
+                historyArray['module'] = 'wb';
+                storeHistoryData(historyArray);
+
+            })
+            $('.share_conf').click(function() {
+                onModuleChange('video', true);
+                var historyArray = {};
+                historyArray['action'] = 'module';
+                historyArray['module'] = 'video';
+                storeHistoryData(historyArray);
+                
+            })
+
+            $('#screen_share').click(function() {
+                if ($('#scrnbtn').html() == 'Share Screen') {
+                    startShare();
+                } else {
+                    stopShare();
+                }
+                if (browser_name == 'Chrome') {
+                    $('#screen_share').hide();
+                }
+
+            })
+            $('#leaveMeeting').click(function() {
+                
+                $('.modal').modal('hide');
+                var data = {};
+                data['method'] = 'leveFromMeeting';
+                data['name'] = userName;
+                data['feedback'] = $('.feedbackfm').val();
+                sendToAll(JSON.stringify(data));
+                setTimeout(function(){
+                    clearRoom();
+                     window.location = folder_path+"dashboard";
+                },1000);
+               
+                /*$('#endMsg').html('You have succesfully leave from meeting please give feedback');
+                $('#endMeeting,#leaveMeeting').hide();
+                $('#sendFeedback').show();*/
+            });
+            $('#sendFeedback').click(function(){
+               setTimeout(function() {
+                        window.location = folder_path+"dashboard";
+                }, 2000);
+            });
+            $('#sendFeedback').click(function(){
+               setTimeout(function() {
+                        window.location = folder_path+"dashboard";
+                }, 2000);
+            });
+            $('#endMeeting').click(function() {
+                /*$('#endMsg').html('This meeting ended succesfully please give feedback');
+                $('#endMeeting,#leaveMeeting').hide();
+                $('#sendFeedback').show();*/
+                var modData = {};
+                modData['method'] = 'end_meeting';
+                sendToAll(JSON.stringify(modData));
+                setTimeout(function() {
+                    clearRoom();
+                    $('.modal').modal('hide');
+                    window.location = folder_path+"dashboard";
+                }, 2000);
+
+
+            });
+            $('.fullscreenmob').click(function() {
+                //var elem = document.body; // Make the body go full screen.
+                var elem = document.getElementById('mainParent');
+                toggleFull(elem);
+                setTimeout(setView, 3000);
+            });
+
+            $('.mute-all').click(function() {
+                /*var modData = {};
+                modData['method'] = 'mute_all';
+                modData['myid'] = socketId;
+                sendToAll(JSON.stringify(modData));
+                controlAudioAll('false', socketId);
+                */
+                $('.mic-on-off').each(function() {
+                    var id = this.id.replace('m-', '');
+                    $('.' + this.id).addClass('selectedOption');
+                    controlAudio('false', id);
+                    var obj = {};
+                    obj['method'] = 'audio_ctrl';
+                    obj['id'] = id;
+                    obj['status'] = 'false';
+                    if (mode == 'presenter')
+                        sendToAll(JSON.stringify(obj));
+                });
+                showNotifiction('Muted all users');
+            });
+            $('.un-mute-all').click(function() {
+                /*var modData = {};
+                modData['method'] = 'un_mute_all';
+                modData['myid'] = socketId;
+                sendToAll(JSON.stringify(modData));
+                controlAudioAll('true', socketId);
+                showNotifiction('Unmuted all users');*/
+                $('.mic-on-off').each(function() {
+                    var id = this.id.replace('m-', '');
+                    var allow = 1;
+                    if (audio_lock_array.hasOwnProperty(id)) {
+                        if (audio_lock_array[id] == 'false') {
+                            allow = 0;
+                        }
+                    }
+                    if (allow == 1) {
+                        $('.' + this.id).removeClass('selectedOption');
+                        controlAudio('true', id);
+                        var obj = {};
+                        obj['method'] = 'audio_ctrl';
+                        obj['id'] = id;
+                        obj['status'] = 'true';
+                        if (mode == 'presenter')
+                            sendToAll(JSON.stringify(obj));
+                    }
+                });
+                showNotifiction('Unmuted all users');
+            });
+            $('#chatuser-public').click(function() {
+                $('#toid').attr("data-toid", 'public');
+                $('#toname').html('public');
+                $('#messageprivacy').html('(public)');
+            });
+            $('#sendInvite').click(function() {
+                sendInvitation();
+            });
+            $('#copyInvite').click(function() {
+                copyToClipboard(document.getElementById("invite-msg"));
+            });
+            $('#copyLink').click(function() {
+                copyToClipboard(document.getElementById("link-hidden"));
+            });
+            $('.recordbut').click(function() {
+                var stat = $('.recordbutton_mtxt').html();
+                if (stat == 'Record') {
+                    $('.recordbutton_mtxt').html('Stop record')
+                    $('.overlayrecbut').show();
+                    showNotifiction('Recording started succesfully for this session');
+                    var data = {
+                        id: "startRecording",
+                        room: room
+                    };
+                    sendMessage(data);
+                } else {
+                    $('.recordbutton_mtxt').html('Record')
+                    $('.overlayrecbut').hide();
+                    showNotifiction('Recording stoped succesfully for this session');
+                    var data = {
+                        id: "stopRecording",
+                        room: room
+                    };
+                    sendMessage(data);
+                }
+            });
+            $(window).blur(function(){
+              //your code here
+              focus = 0;
+            });
+            $(window).focus(function(){
+              //your code
+              //alert('focus');
+              focus = 1;
+            });
+
+            $('.feedbackcheck').change(function() {
+                if ($('.feedbackcheck').is(':checked'))
+                    $(".feedbackfm").show(); // checked
+                else
+                    $(".feedbackfm").hide();
+            });
+            $('.chat-close').click(function() {
+                $('#right-pane').fadeOut();
+            });
+            $('.chatButtonMob,.partButtonMob').click(function() {
+                $('#right-pane').fadeIn();
+            });
+            if (mode == 'presenter') {
+                timerFunction();
+            }
+            if(isIframe()){
+                $('hr').hide();
+                $('.class-p').hide();
+                $('.t-btns').hide();
+            }
+            setTimeout(loadHistory, 3000);
+
+        });
+
+        var chatOpen = 1;
+        var listOpen = 1;
+        $(document).ready(function() {
+            onSetView();
+        });
+
+        function onCountExceed() {
+            swal("Try another room!", "This room is full now please try another one")
+        }
+
+        function roomError() {
+            swal("Something went wrong", "Something went wrong please restart the page..")
+        }
+
+        function onSetView() {
+            var chatminus  = 20;
+            if(mode == 'presenter'){
+                chatminus = 40;
+            }
+            
+            var sidebarht = $('.rightsidebar').height();
+            $(".online-users-btn").click(function() {
+                if (listOpen == 1) {
+                    if (chatOpen == 0) {
+                        $('.inner-online-users').hide();
+                    } else {
+                        $('.inner-online-users').hide();
+                        $('.inner-chat-box').height(sidebarht + 45);
+                    }
+                    listOpen = 0;
+                } else {
+                    if (chatOpen == 0) {
+
+                        $('.inner-online-users').fadeIn();
+                        $('.inner-online-users').height(sidebarht);
+                        $('#userList').height($('.inner-online-users').height() - 45);
+                    } else {
+
+                        $('.inner-online-users').fadeIn();
+                        $('.inner-online-users').height(sidebarht / 2.5);
+                        $('#userList').height($('.inner-online-users').height() - 45);
+                        $('.inner-chat-box').height(sidebarht / 1.5);
+                    }
+                    listOpen = 1;
+                }
+                if ($('.inner-chat-box').height() < 300) {
+                    $('#chat_list').height(($('.inner-chat-box').height()) -chatminus);
+                } else {
+                    $('#chat_list').height(($('.inner-chat-box').height()) - chatminus);
+                }
+
+            });
+            $(".chat-box-btn").click(function() {
+                if (chatOpen == 1) {
+                    if (listOpen == 0) {
+                        $('.inner-chat-box').hide();
+                    } else {
+                        $('.inner-chat-box').hide();
+                        $('.inner-online-users').height(sidebarht);
+                        $('#userList').height($('.inner-online-users').height() - 45);
+                    }
+                    chatOpen = 0;
+                } else {
+                    if (listOpen == 0) {
+                        $('.inner-chat-box').fadeIn();
+                        $('.inner-chat-box').height(sidebarht + 45);
+                    } else {
+                        $('.inner-chat-box').fadeIn();
+                        $('.inner-chat-box').height(sidebarht / 1.5);
+                        $('.inner-online-users').height(sidebarht / 2.5);
+                        $('#userList').height($('.inner-online-users').height() - 45);
+                    }
+                    chatOpen = 1;
+                }
+
+                if ($(document).height() < 600) {
+                    $('#chat_list').height(($('.inner-chat-box').height()) - chatminus);
+                } else {
+                    $('#chat_list').height(($('.inner-chat-box').height()) - chatminus);
+                }
+            });
+
+        }
+
+        function timerFunction() {
+            if (socketId) {
+                session_time++;
+                if (session_time % 5 == 0) {
+                    var data = {
+                        id: "saveRecTime",
+                        room: room
+                    };
+                    sendMessage(data);
+                }
+            }
+            setTimeout(timerFunction, 1000);
+        }
+
+        function cancelFullScreen(el) {
+            var requestMethod = el.cancelFullScreen || el.webkitCancelFullScreen || el.mozCancelFullScreen || el.exitFullscreen;
+            if (requestMethod) { // cancel full screen.
+                requestMethod.call(el);
+            } else if (typeof window.ActiveXObject !== "undefined") { // Older IE.
+                var wscript = new ActiveXObject("WScript.Shell");
+                if (wscript !== null) {
+                    wscript.SendKeys("{F11}");
+                }
+            }
+            $('.mainParent').removeClass('width100');
+        }
+
+        function requestFullScreen(el) {
+            // Supports most browsers and their versions.
+            var requestMethod = el.requestFullScreen || el.webkitRequestFullScreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+
+            if (requestMethod) { // Native full screen.
+                requestMethod.call(el);
+            } else if (typeof window.ActiveXObject !== "undefined") { // Older IE.
+                var wscript = new ActiveXObject("WScript.Shell");
+                if (wscript !== null) {
+                    wscript.SendKeys("{F11}");
+                }
+            }
+            $('.mainParent').addClass('width100');
+            return false
+        }
+
+        function toggleFull(elem) {
+            var isInFullScreen = (document.fullScreenElement && document.fullScreenElement !== null) || (document.mozFullScreen || document.webkitIsFullScreen);
+            if (isInFullScreen) {
+                cancelFullScreen(document);
+            } else {
+                requestFullScreen(elem);
+            }
+            return false;
+        }
+        function validateEmail($email) {
+          var emailReg = /^([\w-\.]+@([\w-]+\.)+[\w-]{2,4})?$/;
+          return emailReg.test( $email );
+        }
+        function sendInvitation() {
+            var inviteEmails = [];
+            var message = $('#invite-msg').val();
+            var emailError = 0;
+            $('.tagit-hidden-field').each(function(index, item) {
+                inviteEmails.push($(item).val());
+                if(!validateEmail($(item).val())){
+                   emailError = 1;
+                }
+            });
+            if(emailError == 1){
+               alert('Invalid email address');
+               return;
+            }
+            var inviteEmailsJson = JSON.stringify(inviteEmails);
+            if (inviteEmailsJson != '[]') {
+                setTimeout(function() {
+                    $('.modal').modal('hide');
+                }, 1000);
+                //alert(inviteEmailsJson);
+                $.ajax({
+                    url: "service/sendInvite.php",
+                    data: {
+                        link: inviteUrl,
+                        email: inviteEmailsJson
+                    },
+                    method: "POST",
+                    success: function(d) {
+                      showNotifiction('Invitation send succesfully');
+                    }
+
+                });
+            } else {
+                alert('please enter atleast one email address');
+            }
+
+
+        }
+
+        function onEndMeetingBePresenter() {
+            clearRoom();
+            $('#endButton').trigger('click');
+            $('#endMsg').html('This meeting has been ended by the presenter');
+            $('#endMeeting,#leaveMeeting,#cancelMeeting').hide();
+            $('#sendFeedback').show();
+            $('#sendFeedback').html(' OK ');
+            $('#right-pane').hide();
+            $('#left-pane').hide();
+        }
+
+        function onModuleChange(module, send) {
+            if (module == 'video') {
+                $('.meeting').show();
+                setTimeout(function layot() {
+                    layout();
+                }, 500);
+            } else {
+                $('.meeting').hide();
+            }
+            if (send) {
+                var modData = {};
+                modData['method'] = 'module_change';
+                modData['module'] = module;
+                sendToAll(JSON.stringify(modData));
+            }
+        }
+
+        function controlVideo(status, id) {
+            if (status == 'false') {
+                if ($(".novideo-" + id).length != 0) {
+                    //it doesn't exist
+                    return;
+                }
+                var loadimg = $('<img class="novideo-' + id + ' center-block" src="assets/images/novideo.jpg" alt="loader" />');
+                var idval = $('#video-' + id).parent().attr('id');
+                if(idval == 'layout'){
+                 var layH = $('#layout').height();
+                 loadimg = $('<img style="min-height: '+layH+'px !important;margin-top:57px;" class="novideo-' + id + ' center-block" src="assets/images/novideo.jpg" alt="loader" />');
+                }
+                $('#video-' + id).parent().append(loadimg);
+                loadimg.addClass('hideclass');
+                setTimeout(function tout() {
+                    loadimg.removeClass('hideclass');
+                }, 500)
+                loadimg.height($('#video-' + id).height());
+                $('#video-' + id).hide();
+                $('.v-' + id).addClass('selectedOption');
+                layout();
+            } else {
+                var allow = 1;
+
+                if (video_lock_array.hasOwnProperty(id)) {
+                    if (video_lock_array[id] == 'false') {
+                        allow = 0;
+                    }
+                }
+
+                if (allow == 1) {
+                    $('#video-' + id).show();
+                    $('.novideo-' + id).remove();
+                    layout();
+                    $('.v-' + id).removeClass('selectedOption');
+                } else {
+                    showNotifiction('You cannot enable video this time');
+                }
+
+            }
+
+        }
+
+        function controlAudio(status, id) {
+            if (status == 'false') {
+                $('#video-' + id).prop('muted', true);
+                $('.m-' + id).addClass('selectedOption');
+            } else {
+                var allow = 1;
+                if (audio_lock_array.hasOwnProperty(id)) {
+                    if (audio_lock_array[id] == 'false') {
+                        allow = 0;
+                    }
+                }
+                if (allow == 1) {
+                    $('#video-' + id).prop('muted', false);
+                    $('.m-' + id).removeClass('selectedOption');
+                } else {
+                    showNotifiction('You cannot unmute audio this time');
+                }
+
+            }
+        }
+
+        function controlAudioAll(status, id) {
+            if (status == 'false') {
+                $('video').prop('muted', true);
+            } else {
+                $('video').prop('muted', false);
+                $('#video-' + socketId).prop('muted', true);
+            }
+
+            /*var vid = $("video");
+            $.map( vid, function( n, i ) {
+              alert('looped');
+                  var id = n.id;
+                  alert('attr'+id);
+                  if(id != 'video-'+id){
+                    alert('muted');
+                      if(status == 'false') {
+                        n.prop('muted',true);
+                      }else{
+                        n.prop('muted',false);
+                      } 
+                  }
+            });*/
+
+        }
+
+        function setView() {
+            var chatminus  = 20;
+            var mainHightReduse =1;
+            var rightHeightReduse = 200; 
+            if(mode == 'presenter'){
+                chatminus = 40;
+            }
+            if(setViewBlock == 1)
+                return;
+            var height = $('#main-container').height();
+            var width  = $('#main-container').width();
+            if(width < 736){
+               height = height + 200;
+            }
+            $('.outer-area').height(height - mainHightReduse);
+            $('.output-area').height(height - mainHightReduse);
+            $('.outer-wrapper').height(height - mainHightReduse);
+            var boxht = $(document).height();
+            /*if(width < 736){
+               boxht = boxht + 200;
+            }*/
+            ////console.log('set view ='+boxht);
+            $('.inner-online-users').height((boxht - rightHeightReduse) / 2.5);
+            $('#userList').height($('.inner-online-users').height() - 45);
+            $('.inner-chat-box').height((boxht - rightHeightReduse) / 1.5);
+            $('.rightsidebar').height(boxht - rightHeightReduse);
+            if ($('.inner-chat-box').height() < 300) {
+                $('#chat_list').height(($('.inner-chat-box').height())- chatminus);
+            } else {
+                $('#chat_list').height(($('.inner-chat-box').height())- chatminus);
+            }
+
+            if (webinar == '0') {
+                $('#myvideo').height(height - 231);
+            } else {
+                $('#myvideo').height(height);
+            }
+            $('.myvideo').attr('poster', 'assets/images/novideo.jpg');
+            if (webinar == '1') {
+                $('video').removeClass('myvideo');
+                var titHeigh = $('.title-header').height();
+                $('#myvideo').css("height", (height-titHeigh-60));
+                $('#myvideo').css("top", titHeigh+2);
+            }
+            $('.meetingvideo').show()
+        }
+        var localVideo;
+        var sessionId;
+        var screensessionId;
+        var participants = {};
+        var reloadforscreenshare = 0;
+        var globalconstraints = 0;
+        var socket = null;
+        var layout;
+
+
+
+
+        //================================================================
+
+        var connctionLost = 0;
+        var pingsend = 0;
+
+        function onExistingUserForConnectionCheck(data) {
+            //checking any user missing
+            var existingIdDictionary = {};
+            data = data.data
+            data = data.toString()
+                //console.log('Existing Ids : ' + data);
+            var x = new Array();
+            x = data.split(',');
+            var loastedId = 0;
+            for (var i = 0; i < x.length; i++) {
+                var str = x[i];
+                var res = str.split("*_*");
+                var rm = res[1];
+                if (rm == room) {
+                    var len = $('#video-' + res[0]).length;
+                    existingIdDictionary[res[0]] = 'true';
+                    if (len == 0) {
+                        connctionLost = 1;
+                        loastedId = res[0];
+                    }
+                }
+
+            }
+            if (data == '0') {
+                connctionLost = 1;
+            }
+            if (connctionLost == 1) {
+                if (pingsend == 0) {
+                    pingsend = 1;
+                    pingUsers(loastedId);
+                }
+
+            }
+            // checking for extra video
+            var vid = $("video");
+            if (vid != null) {
+                $.map(vid, function(n, i) {
+                    var currentId = n.getAttribute('data-myid');
+                    ////console.log('current '+currentId+ ' existing : '+existingIdDictionary.hasOwnProperty(currentId));
+                    if (!existingIdDictionary.hasOwnProperty(currentId)) {
+                        $('#video-' + currentId).remove();
+                        layout();
+                    }
+                    if (n.paused) {
+                        var removedId = n.getAttribute('data-myid');
+                        $('#video-' + removedId).remove();
+                    }
+                    layout();
+                });
+            }
+        }
+        //==========================================
+        window.onbeforeunload = function() {
+            socket.disconnect();
+        };
+        /**
+         * Register to a romm
+         * @param role ( screen for screen share default role for cam share )
+         */
+        function register(roleval) {
+            if(authenticated == 0){
+                return
+            }
+            var data = {
+                id: "register",
+                userName: userName,
+                role: roleval,
+                mode: mode,
+                webinar: webinar,
+                room:room
+            };
+            sendMessage(data);
+        }
+
+        /**
+         * Send message to server
+         * @param data
+         */
+        function sendMessage(data) {
+            if (socket) {
+                socket.emit("message", data);
+            }
+
+        }
+
+        /**
+         * Check if roomName exists, use DOM roomName otherwise, then join room
+         * @param roomName and roleval
+         */
+        function joinRoom(roomName, roleval) {
+            if (typeof roomName == 'undefined') {
+                roomName = room;
+            }
+            var data = {
+                id: "joinRoom",
+                roomName: roomName,
+                userName: userName,
+                role: roleval,
+                mode: mode,
+                webinar: webinar,
+                recording: record
+            };
+            sendMessage(data);
+        }
+        /**
+         * Request video from all existing participants
+         * @param message
+         */
+
+        function onExistingParticipants(message, ses_id, name_id, cur_role, recording) {
+            $('.connecting').hide();
+            if (recording == 'true') {
+                if (mode == 'presenter') {
+                    $('.recordbutton_mtxt').html('Stop record')
+                    $('.overlayrecbut').show();
+                    showNotifiction('Recording resumed succesfully for this session');
+                }
+            }
+            showNotifiction('succesfully joined to room..');
+            connctionLost = 0;
+            onParticipantLeft({
+                sessionId: ses_id
+            });
+            if (globalconstraints == 0) {
+                if (webinar == '0' || mode == 'presenter') {
+                    if (mode == 'presenter') {
+                        var availHeight = $('#myvideo').height();
+                        var availWidth1 = (availHeight * 4) / 3;
+                        var availWidth2 = (availHeight * 16) / 9;
+                    } else {
+                        var availHeight = $('#layout').height();
+                        var availWidth1 = (availHeight * 4) / 3;
+                        var availWidth2 = (availHeight * 16) / 9;
+                    }
+
+                    var constraints = {
+                        audio: true,
+                         video: {
+                            frameRate: 15,
+                            width: 320,
+                            height: 240
+                        }
+                  };
+                } else {
+                    var constraints = {
+                        audio: false,
+                        video: false
+                    };
+                }
+
+            } else {
+                var constraints = globalconstraints;
+            }
+            var localParticipant = new Participant(ses_id, cur_role, mode, webinar);
+            participants[ses_id] = localParticipant;
+            createVideoForuserList(userName, name_id, cur_role, mode, 'false', 'false');
+            localVideo = document.getElementById("video-" + name_id);
+            var video = localVideo;
+
+            // bind function so that calling 'this' in that function will receive the current instance
+            var options = {
+                localVideo: video,
+                mediaConstraints: constraints,
+                onicecandidate: localParticipant.onIceCandidate.bind(localParticipant)
+            };
+
+            if (webinar == '0' || mode == 'presenter') {
+                localParticipant.rtcPeer = new kurentoUtils.WebRtcPeer.WebRtcPeerSendonly(options, function(error) {
+                    if (error) {
+                        return console.log(error);
+                    }
+                    localVideo = document.getElementById("video-" + name_id);
+                    localVideo.src = localParticipant.rtcPeer.localVideo.src;
+                    localVideo.muted = true;
+                    this.generateOffer(localParticipant.offerToReceiveVideo.bind(localParticipant));
+
+                });
+            }
+            if (reloadforscreenshare == 0) {
+
+                for (var i in message.data) {
+                    var str = message.data[i];
+                    var res = str.split("*_*");
+                    var request = {};
+                    request['userid'] = res[0];
+                    request['userName'] = res[1];
+                    request['role'] = res[2];
+                    request['mode'] = res[3];
+                    request['video'] = res[4];
+                    request['audio'] = res[5];
+                    receiveVideoFrom(res[0], request);
+
+                }
+
+            }
+            if (cur_role == 'screen') {
+                $('#video-' + socketId).hide();
+            }
+            reloadforscreenshare = 0;
+        }
+        /**
+         * Receive video from new participant
+         * @param message
+         */
+        function onNewParticipant(message) {
+            message.video = 'true';
+            message.audio = 'true';
+            receiveVideoFrom(message.new_user_id, message);
+        }
+        /**
+         * Add new participant locally and request video from new participant
+         * @param sender
+         */
+        function receiveVideoFrom(sender, message) {
+            var res = sender.replace("_screen", "");
+            if (res != socketId) {
+                var participant = new Participant(sender, role, mode, webinar);
+                participants[sender] = participant;
+                var video = createVideoForParticipant(sender, message);
+
+                // bind function so that calling 'this' in that function will receive the current instance
+                var options = {
+                    remoteVideo: video,
+                    onicecandidate: participant.onIceCandidate.bind(participant)
+                };
+
+                participant.rtcPeer = new kurentoUtils.WebRtcPeer.WebRtcPeerRecvonly(options, function(error) {
+                    if (error) {
+                        //alert('error');
+                        return console.log(error);
+                    }
+                    this.generateOffer(participant.offerToReceiveVideo.bind(participant));
+                });
+            }
+        }
+        /**
+         * On receive video answer
+         * @param message
+         */
+        function onReceiveVideoAnswer(message) {
+            var participant = participants[message.sessionId];
+            participant.rtcPeer.processAnswer(message.sdpAnswer, function(error) {
+                if (error) {
+                    console.log(error);
+                } else {
+                    participant.isAnswer = true;
+                    while (participant.iceCandidateQueue.length) {
+                        var candidate = participant.iceCandidateQueue.shift();
+                        participant.rtcPeer.addIceCandidate(candidate);
+                    }
+                }
+            });
+        }
+        /**
+         * Create video DOM element
+         * @param participant
+         * @returns {Element}
+         */
+        function createVideoForParticipant(userid, message) {
+
+            //pingUsers(userid);
+
+            var videoId = "video-" + userid;
+            createVideoForuserList(message.userName, userid, message.role, message.mode, message.video, message.audio);
+            return document.getElementById(videoId);
+
+
+        }
+        /**
+         * Function for creating video elements
+         * @param realName,name_id,userRole,userMode
+         */
+        function createVideoForuserList(realName, name_id, userRole, userMode, video, audio) {
+            //alert(video+'//'+audio);
+
+            if (userRole == 'screen') {
+                var currentid = name_id.replace("_screen", "");
+                $('#video-' + currentid).hide();
+                if (currentid != socketId)
+                    showNotifiction(realName + ' started screenshare, click screen video for fullscreen view');
+                //alert('#video-'+currentid);
+            }
+            if (webinar == '0' || userMode == 'presenter') {
+                var video_html = '<video data-myid="' + name_id + '" onplay="onPlayVideo(\'' + name_id + '\')" id="video-' + name_id + '" autoplay="true" poster="assets/images/novideo.jpg"></video>';
+                if (userMode == 'presenter') {
+                    var video_html = '<video height="100%" data-myid="' + name_id + '" onplay="onPlayVideo(\'' + name_id + '\')" id="video-' + name_id + '" autoplay="true" class="meetingvideo  center-block myvideo" poster="assets/images/novideo.jpg"></video>';
+                    $('#myvideo').prepend(video_html);
+                    /* var availHeight = $('#myvideo').height();
+                     var calcWidth   = availHeight*(16/9);
+                     $('#video-'+name_id).height(availHeight);
+                     $('#video-'+name_id).width(calcWidth);*/
+                } else {
+                    
+                    $('#layout').append(video_html);
+
+                }
+                setView();
+                layout();
+                $('#video-' + name_id).addClass('hideclass');
+                setTimeout(function tout() {
+                    $('#video-' + name_id).removeClass('hideclass');
+                }, 1000);
+                $('#video-' + name_id).click(function() {
+                    setViewBlock = 1;
+                    var id = this.id.replace('video-', '');
+                    fullscreen(id);
+                })
+                $('video#video-' + name_id).bind('webkitfullscreenchange mozfullscreenchange fullscreenchange', function(e) {
+                    var state = document.fullScreen || document.mozFullScreen || document.webkitIsFullScreen;
+                    var event = state ? 'FullscreenOn' : 'FullscreenOff';
+                    if(event == 'FullscreenOff'){
+                       //setTimeout(setView, 3000);
+                       setViewBlock = 0;
+                    }    
+                });
+                var vid = document.getElementById('video-' + name_id);
+                vid.onended = function() {
+                    alert("The audio has ended");
+                };
+            }
+            if (userRole != 'screen') {
+                generateUserList(realName, name_id, userRole, userMode, video, audio);
+            }
+
+
+        }
+
+        function fullscreen(id) {
+
+            var elem = document.getElementById('video-' + id);
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.mozRequestFullScreen) {
+                elem.mozRequestFullScreen();
+            } else if (elem.webkitRequestFullscreen) {
+                elem.webkitRequestFullscreen();
+            }
+        }
+        function capital(string) {
+            return string.charAt(0).toUpperCase();
+        }
+        /**
+         * Function for generating user list
+         */
+        function generateUserList(nameOfUser, idOfUser, roleOfUser, modeOfUser, video, audio) {
+            var user_option_html = '';
+            if (idOfUser != socketId) {
+                user_option_html += '<div class="opt-parent hide-small">';
+                if (modeOfUser != 'viewer' || webinar == '0')
+                    if (video == 'false') {
+                        user_option_html += '<div title="Video ON/OFF" class="selectedOption cam-on-off chat-vid useropt v-' + idOfUser + '" id="v-' + idOfUser + '"><i class="fa fa-video-camera cam-ic"></i></div>';
+                        controlVideo(video, idOfUser);
+                    } else {
+                        user_option_html += '<div title="Video ON/OFF" class="cam-on-off chat-vid useropt v-' + idOfUser + '" id="v-' + idOfUser + '"><i class="fa fa-video-camera cam-ic"></i></div>';
+                    }
+
+                if (modeOfUser != 'viewer' || webinar == '0') {
+                    if (audio == 'false') {
+                        user_option_html += '<div title="Sound ON/OFF" class="selectedOption mic-on-off chat-mic useropt m-' + idOfUser + '" id="m-' + idOfUser + '"><i class="fa fa-microphone microphone-icon"></i></div>';
+                        controlAudio(audio, idOfUser);
+                    } else {
+                        user_option_html += '<div title="Sound ON/OFF" class="mic-on-off chat-mic useropt m-' + idOfUser + '" id="m-' + idOfUser + '"><i class="fa fa-microphone microphone-icon"></i></div>';
+
+                    }
+                    if (mode != 'presenter') {
+                        video_lock_array[idOfUser] = video;
+                        audio_lock_array[idOfUser] = audio;
+                    }
+                }
+                if (mode == 'presenter')
+                    user_option_html += '<div title="Kick User" class="kick-user chat-mic useropt k-' + idOfUser + '" id="k-' + idOfUser + '"><i class="fa fa-times microphone-icon"></i></div>';
+                if (modeOfUser == 'viewer' && webinar == '0' && mode == 'presenter'){
+                    user_option_html += '<div title="Asign as Presenter" style="padding-left:6px !important;display:none;" class="fullscrn chat-mic useropt presenter-' + idOfUser + '" id="presenter-' + idOfUser + '"><i class="fa fa-laptop"></i></div></div>';
+                }else{
+                    user_option_html += '<div title="Asign as Presenter" style="padding-left:6px !important;display:none;" class="fullscrn chat-mic useropt presenter-' + idOfUser + '" id="presenter-' + idOfUser + '"><i class="fa fa-laptop"></i></div></div>';
+                }
+                
+                user_option_html += '<div class="opt-mobile hide-big dropdown"><button class="dropdown-toggle transparentbutton host-icon" type="button" data-toggle="dropdown"><span class="more-menu"><img class="host-menu" src="assets/images/more.png" alt="quick actions" /></span></button><ul class="dropdown-menu opt-mobile-dropdown">';
+                if (modeOfUser != 'viewer' || webinar == '0')
+                    var selectedClass = '';
+                if (video == 'false') {
+                    user_option_html += '<li title="Video ON/OFF" class="selectedOption cam-on-off chat-vid useropt v-' + idOfUser + ' ' + selectedClass + '" id="v-' + idOfUser + '"><i class="op-mob fa fa-video-camera cam-ic"></i></li>';
+
+                } else {
+                    user_option_html += '<li title="Video ON/OFF" class="cam-on-off chat-vid useropt v-' + idOfUser + ' ' + selectedClass + '" id="v-' + idOfUser + '"><i class="op-mob fa fa-video-camera cam-ic"></i></li>';
+                }
+
+                if (modeOfUser != 'viewer' || webinar == '0')
+
+                    if (audio == 'false') {
+                        user_option_html += '<li title="Sound ON/OFF" class="selectedOption mic-on-off chat-mic useropt m-' + idOfUser + '" id="m-' + idOfUser + '"><i class="op-mob fa fa-microphone microphone-icon"></i></li>';
+
+                    } else {
+                        user_option_html += '<li title="Sound ON/OFF" class="mic-on-off chat-mic useropt m-' + idOfUser + '" id="m-' + idOfUser + '"><i class="op-mob fa fa-microphone microphone-icon"></i></li>';
+                    }
+
+
+                if (mode == 'presenter')
+                    user_option_html += '<li title="Kick User" class="kick-user chat-mic useropt k-' + idOfUser + '" id="k-' + idOfUser + '"><i class="op-mob fa fa-times microphone-icon"></i></li>';
+                if (modeOfUser != 'viewer' || webinar == '0')
+                    user_option_html += '<li style="display:none" title="Full Screen" class="fullscrn chat-mic useropt f-' + idOfUser + '" id="f-' + idOfUser + '"><i class="op-mob fa fa-arrows-alt microphone-icon"></i></li></ul>';
+
+            }
+            var userHtml = '';
+            if (modeOfUser == 'presenter') {
+                userHtml += '<li id="user-' + idOfUser + '" class="list-group-item"><span class="shortname greenround">'+capital(nameOfUser)+'</span><span id="username-' + idOfUser + '">' + nameOfUser + '</span><span class="preslab-'+idOfUser+'">(Host)</span>' + user_option_html + '</li>';
+            } else {
+                userHtml += '<li id="user-' + idOfUser + '" class="list-group-item"><span class="shortname blueround">'+capital(nameOfUser)+'</span><span id="username-' + idOfUser + '">' + nameOfUser + '</span><span class="preslab-'+idOfUser+'"></span>' + user_option_html + '</li>';
+            }
+            $('#userList').append(userHtml);
+            totalPart = $('#userList').children('li').length;
+            $('.part-count').html(totalPart);
+            if (socketId != idOfUser) {
+                $chatList = '<li id="chatuser-' + idOfUser + '" data-id="' + idOfUser + '"><a id="chatusername-' + idOfUser + '">' + nameOfUser + '</a></li>';
+                $('.recent-chat-user').append($chatList);
+            }
+            $('#chatuser-' + idOfUser).click(function() {
+                //alert(idOfUser);
+                $('#toid').attr("data-toid", idOfUser);
+                $('#toname').html($('#chatusername-' + idOfUser + '').html());
+                $('#messageprivacy').html('(private)');
+            })
+            if (idOfUser != socketId) {
+                showNotifiction(nameOfUser + ' joined');
+            }
+            $(".v-" + idOfUser).click(function() {
+                var allow = 1;
+                var id = this.id.replace('v-', '');
+                var status = 'false';
+                if ($(".v-" + idOfUser).hasClass('selectedOption')) {
+                    if (video_lock_array.hasOwnProperty(id)) {
+                        if (video_lock_array[id] == 'false') {
+                            allow = 0;
+                        }
+                    }
+                    status = 'true';
+                    if (allow == 1)
+                        $(".v-" + idOfUser).removeClass('selectedOption');
+                } else {
+                    $(".v-" + idOfUser).addClass('selectedOption');
+                }
+                if (allow == 1) {
+                    controlVideo(status, id);
+                    var obj = {};
+                    obj['method'] = 'video_ctrl';
+                    obj['id'] = id;
+                    obj['status'] = status;
+                    if (mode == 'presenter')
+                        sendToAll(JSON.stringify(obj));
+                } else {
+                    showNotifiction('you cannot enable video this time');
+                }
+
+
+            });
+            $(".m-" + idOfUser).click(function() {
+                var id = this.id.replace('m-', '');
+                var status = 'false';
+                var mutlab = 'muted';
+                var allow = 1;
+                if ($(".m-" + idOfUser).hasClass('selectedOption')) {
+                    status = 'true';
+                    mutlab = 'unmuted';
+
+                    if (audio_lock_array.hasOwnProperty(id)) {
+                        if (audio_lock_array[id] == 'false') {
+                            allow = 0;
+                        }
+                    }
+                    if (allow == 1)
+                        $(".m-" + idOfUser).removeClass('selectedOption');
+                } else {
+                    $(".m-" + idOfUser).addClass('selectedOption');
+                }
+                if (allow == 1) {
+                    controlAudio(status, id);
+                    var name = $("#username-" + idOfUser).html();
+                    var obj = {};
+                    obj['method'] = 'audio_ctrl';
+                    obj['id'] = id;
+                    obj['status'] = status;
+                    if (mode == 'presenter')
+                        sendToAll(JSON.stringify(obj));
+                } else {
+                    showNotifiction('you cannot enable audio this time')
+                }
+            });
+            $(".presenter-" + idOfUser).click(function() {
+                var id = this.id.replace('presenter-', '');
+                assignPresenter(id);
+            });
+            $(".k-" + idOfUser).click(function() {
+                var id = this.id.replace('k-', '');
+                var kickdata = {};
+                kickdata['method'] = 'onkick';
+                kickdata['user_id'] = id;
+                var kickjson = JSON.stringify(kickdata);
+                sendToAll(kickjson);
+            });
+            //$('.all-chat-user').append(chatList);
+        }
+        /**
+         * Function triggered when playing a video 
+         * @param socketId
+         */
+        function onPlayVideo(id) {
+
+        }
+        /**
+         * Destroy videostream/DOM element on participant leaving room
+         * @param message
+         */
+        function onParticipantLeft(message) {
+            if (participants[message.sessionId]) {
+                var participant = participants[message.sessionId];
+                participant.dispose();
+                delete participants[message.sessionId];
+            }
+            if (message.screen == '1') {
+
+                var res = message.sessionId.replace("_screen", "");
+                $('#video-' + message.sessionId).remove();
+                $('#video-' + res).show();
+
+            } else {
+                if (message.sessionId != socketId) {
+                    var namev = $('#username-' + message.sessionId).html();
+                    if (namev) {
+                        showNotifiction(namev + ' left');
+                    }
+
+                }
+
+                $('#video-' + message.sessionId).remove();
+                $('#user-' + message.sessionId).remove();
+                totalPart = $('#userList').children('li').length;
+                $('.part-count').html(totalPart);
+                $('#chatuser-' + message.sessionId).remove();
+                $('#' + message.sessionId).remove();
+                $('.novideo-' + message.sessionId).remove();
+
+            }
+            layout();
+
+
+        }
+        /**
+         * Send data to perticular user
+         * @param contentJson,receiversocket
+         */
+        function sendToOne(contentJson, receiversocket) {
+            var message = {
+                id: 'sendToOne',
+                receiversocket: receiversocket,
+                sendersocket: socketId,
+                contentJson: contentJson,
+                room: room
+            };
+
+            sendMessage(message);
+        }
+        /*
+           function for sending data to all
+        */
+        function sendToAll(contentJson) {
+
+            var message = {
+                id: 'sendToAll',
+                name: socketId,
+                contentJson: contentJson,
+                room: room
+            };
+            sendMessage(message);
+
+        }
+
+        function onReceiveSendToAll(parsedMessage) {
+            if (parsedMessage.room == room) {
+                var jsonstring = parsedMessage.contentJson;
+                var parsedMessage = JSON.parse(jsonstring);
+                var parsedValues;
+                switch (parsedMessage.method) {
+                    case 'video_ctrl':
+                        video_lock_array[parsedMessage.id] = parsedMessage.status;
+                        controlVideo(parsedMessage.status, parsedMessage.id);
+                        if (parsedMessage.status == 'true' && parsedMessage.id == socketId) {
+                            showNotifiction('Your video is enabled by presenter');
+                            $('.videobutton_mtxt,.mobvidtxt').html('Stop Video');
+                        } else if (parsedMessage.id == socketId) {
+                            showNotifiction('Your video is disabled by presenter');
+                            $('.videobutton_mtxt,.mobvidtxt').html('Start Video');
+                        }
+                        break;
+                    case 'audio_ctrl':
+                        audio_lock_array[parsedMessage.id] = parsedMessage.status;
+                        controlAudio(parsedMessage.status, parsedMessage.id);
+                        if (parsedMessage.status == 'true' && parsedMessage.id == socketId) {
+                            showNotifiction('Your audio is unmuted by presenter');
+                            $('.microphone_mtxt,.mobtxtval').html('Mute');
+                        } else if (parsedMessage.id == socketId) {
+                            showNotifiction('Your audio is muted by presenter');
+                            $('.microphone_mtxt,.mobtxtval').html('Un Mute');
+                        }
+
+                        break;
+                    case 'chat':
+                        var msgtype = 'private';
+                        if (parsedMessage.toid == 'public') {
+                            msgtype = 'public';
+                        }
+                        if (msgtype == 'public' || parsedMessage.toid == socketId) {
+                            loadChat('From', parsedMessage.name, parsedMessage.msg, msgtype, '0', false);
+                            var currentCount = parseInt($('.chat-count').html());
+                            currentCount = currentCount + 1;
+                            $('.chat-count').html(currentCount);
+                            if (parsedMessage.msg.indexOf('fa-download') > -1) {
+                                showNotifiction('File received');
+                            }
+                        }
+                        PlaySound();
+                        break;  
+                    case 'leveFromMeeting':
+                      if(mode == 'presenter'){
+                            swal("User Left", parsedMessage.name+" has been left from this session with this feedback \'"+parsedMessage.feedback+"\'")
+                            PlaySound();
+                        }
+                        break;
+                    case 'module_change':
+                        onModuleChange(parsedMessage.module, false);
+                        var historyArray = {};
+                        historyArray['action'] = 'module';
+                        historyArray['module'] = parsedMessage.module;
+                        storeHistoryData(historyArray);
+                        break;
+                    case 'end_meeting':
+                        onEndMeetingBePresenter();
+                        break;
+                    case 'whiteboard':
+                        processWhiteboard(parsedMessage);
+                        break;
+                    case 'mute_all':
+                        controlAudioAll('false', parsedMessage.myid);
+                        showNotifiction('All user\'s audio is muted by presenter');
+                        break;
+                    case 'un_mute_all':
+                        controlAudioAll('true', parsedMessage.myid);
+                        showNotifiction('All user\'s audio is  unmuted by presenter');
+                        break;
+                    case 'onkick':
+                        kickUserRecived(parsedMessage.user_id);
+                    case 'onCloseRoom':
+                        roomCloseRecived(parsedMessage.user_id);
+                    default:
+                        console.log('Unrecognized message', parsedMessage);
+                }
+            }
+        }
+
+        /**
+         * Trigger when someone send data to only me
+         * @param parsedMessage
+         */
+        function onReceiveSendToOne(parsedMessage) {
+
+
+            var jsonstring = parsedMessage.contentJson;
+            var jsonobject = JSON.parse(jsonstring);
+            var parsedValues;
+
+            switch (jsonobject.method) {
+                case 'pinguser':
+                    pingreplysend(jsonobject, parsedMessage.sendersocket);
+                    break;
+                case 'pingreply':
+                    onReceivePingReply(jsonobject);
+                    break;
+
+                default:
+                    console.log('Unrecognized message', parsedMessage);
+            }
+
+        }
+        /**
+         * Function called when admin kick user
+         */
+        function kickUserRecived(id) {
+
+            if (id == socketId) {
+                stopSession = 1;
+                leaveRoom();
+                showNotifiction('You have been kicked from this meeting');
+                socket.disconnect();
+            }
+
+        }
+        function roomCloseRecived(id){
+            if (id == socketId) {
+                stopSession = 1;
+                leaveRoom();
+                swal("Roome Expired!", "Sorry the room is expired");
+                socket.disconnect();
+                $('.confirm').click(function(){
+                    window.location.reload();
+                });
+            }
+        }
+        /**
+         * Destroy ping session for findout ghost user
+         * @param message
+         */
+        //==============================================================
+        function onReceivePingReply(pingdata) {
+
+            var pingid = pingdata['pingid'];
+            if (pingRegistry.hasOwnProperty(pingid)) {
+                var aliveuser = pingRegistry[pingid];
+                delete pingRegistry[pingid];
+                ////console.log('User alive : '+aliveuser);
+
+            }
+        }
+
+        function pingreplysend(pingdata, sendersocket) {
+
+            pingdata['method'] = 'pingreply';
+            var jsonpingdata = JSON.stringify(pingdata);
+            sendToOne(jsonpingdata, sendersocket);
+        }
+        var pingRegistry = {};
+
+        function pingUsers(receiverSocket) {
+
+            var pingdata = {};
+            pingdata['method'] = 'pinguser';
+            pingdata['pingid'] = generateUUID();
+            jsonpingdata = JSON.stringify(pingdata);
+            sendToOne(jsonpingdata, receiverSocket);
+            pingRegistry[pingdata['pingid']] = receiverSocket;
+            setTimeout(checkArrivalOfPingData, 5000, pingdata['pingid'], receiverSocket);
+
+        }
+
+        function checkArrivalOfPingData(pingid, receiverSocket) {
+            if (pingRegistry) {
+                if (pingRegistry.hasOwnProperty(pingid)) {
+                    //console.log('Ghost ditected');
+                    var ghostUser = pingRegistry[pingid];
+                    onParticipantLeft({
+                        sessionId: ghostUser
+                    });
+                } else {
+                    // setTimeout(pingUsers,1000,receiverSocket);
+                    var len = $('#video-' + receiverSocket).length;
+                    if (len == 0) {
+                        //console.log('user missing' + receiverSocket);
+                        leaveRoom();
+                        setTimeout(register, 1000, role);
+                    } else {
+                        connctionLost = 0;
+                    }
+
+                }
+            }
+            pingsend = 0;
+        }
+
+        function clearRoom() {
+            leaveRoom();
+            if (socket)
+                socket.disconnect();
+        }
+        /**
+         * Tell room you're leaving and remove all video elements
+         */
+        function leaveRoom() {
+            if (participants) {
+                if (participants.hasOwnProperty(sessionId)) {
+                    var message = {
+                        id: "leaveRoom"
+                    };
+                    if (webinar == '0') {
+                        participants[sessionId].rtcPeer.dispose();
+                    }
+
+                    sendMessage(message);
+                    participants = {};
+
+                    var myNode = document.getElementById("layout");
+                    while (myNode.firstChild) {
+                        myNode.removeChild(myNode.firstChild);
+                    }
+                    var myNode = document.getElementById("myvideo");
+                    while (myNode.firstChild) {
+                        myNode.removeChild(myNode.firstChild);
+                    }
+                    $("#userList").html('');
+                    $("#chatuser").html('');
+                    layout();
+                }
+            }
+        }
+        /*
+         * Chat functionality 
+         */
+
+        function loadChat(toLabal, To, msg, type, toId, send) {
+            if(send && (enableChat == 'false')){
+                  swal("Chat blocked!", "You dont have the privilege to chat")
+                  return;
+            }
+            var current_time = strftime('%l:%M%P %e %b', new Date());
+            var chat_html = '';
+            chat_html += '<li class="list-group-item">' + toLabal;
+            chat_html += '<span class="bluetext"> ' + To + ' </span> : <span class="messageprivacy"> ' + type + '</span> : <span class="bluetext" style="font-size:10px;">'+current_time+'</span>';
+            chat_html += '<br />' + msg + '</li>';
+            
+            
+            $('#chat_list').append(chat_html);
+            if (send) {
+                var chatdata = {};
+                chatdata['method'] = 'chat';
+                chatdata['name'] = userName;
+                chatdata['participant_id'] = myUserId;
+                chatdata['msg'] = msg;
+                chatdata['toid'] = toId;
+                chatdata['time'] = getTime();
+                sendToAll(JSON.stringify(chatdata));
+            }else{
+                notifyMe(To,msg);
+            }
+            $("#chat_list").scrollTop($("#chat_list").prop("scrollHeight"));
+            var historyArray = {};
+            historyArray['action'] = 'chat';
+            historyArray['html'] = $('#chat_list').html();
+            storeHistoryData(historyArray);
+
+        }
+
+        function checkTime(i) {
+            if (i < 10) {
+                i = "0" + i;
+            }
+            return i;
+        }
+
+        function getTime() {
+            var today = new Date();
+            var h = today.getHours();
+            var m = today.getMinutes();
+            var s = today.getSeconds();
+            // add a zero in front of numbers<10
+            m = checkTime(m);
+            s = checkTime(s);
+            return h + ":" + m + ":" + s;
+
+        }
+        //=========================================================================
+        //===================== common util functions==============================
+        /* 
+         * Generate Unique id 
+         * @return: Unique id
+         */
+        function generateUUID() {
+            var d = new Date().getTime();
+            var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = (d + Math.random() * 16) % 16 | 0;
+                d = Math.floor(d / 16);
+                var out = (c == 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                var ret = out.substr(out.length - 3);
+                return ret;
+            });
+            var ret = uuid.substr(uuid.length - 6);
+            return ret;
+        }
+        /*
+         ** screen share part
+         **
+         */
+        function startShare() {
+            DetectRTC.screen.sourceId = null;
+            captureUserMedia();
+        }
+
+        function completed(constraints) {
+
+
+            if (globalconstraints == 0) {
+
+                globalconstraints = constraints;
+                reloadforscreenshare = 1;
+                register('screen');
+            } else if (globalconstraints.video.mandatory.chromeMediaSourceId != constraints.video.mandatory.chromeMediaSourceId) {
+                globalconstraints = constraints;
+                reloadforscreenshare = 1;
+                register('screen');
+            }
+
+            $('#scrnbtn').html('Stop Sharing');
+
+        }
+
+        function stopShare() {
+
+            $('#scrnbtn').html('Share Screen');
+            $('#screen_share').show();
+            globalconstraints = 0;
+            leaveForScreenShare();
+            reloadforscreenshare = 1;
+        }
+        /**
+         * Tell room you're leaving and remove all video elements
+         */
+        function leaveForScreenShare() {
+
+            if (participants) {
+                if (participants.hasOwnProperty(screensessionId)) {
+                    var message = {
+                        id: "leaveMyPublishOnly"
+                    };
+                    //participants[sessionId].rtcPeer.dispose();
+                    sendMessage(message);
+                    //participants = {};
+                    $('#video-' + socketId + '_screen').remove();
+                    $('#video-' + socketId).show();
+                }
+            }
+
+        }
+        var isWebRTCExperimentsDomain = document.domain.indexOf('webrtc-experiment.com') != -1;
+
+        function captureUserMedia(callback, extensionAvailable) {
+
+            ////console.log('captureUserMedia chromeMediaSource', DetectRTC.screen.chromeMediaSource);
+            if (browser_name == 'Firefox') {
+                if (mozScreenshareAvailable == 0) {
+                    swal({
+                        title: "Plugin un available?",
+                        text: "Screen share plugin is not installed in this browser!",
+                        type: "warning",
+                        showCancelButton: true,
+                        confirmButtonColor: "#DD6B55",
+                        confirmButtonText: "Install plugin",
+                        closeOnConfirm: false
+                    }, function() {
+                        installFirefoxScreenCapturingExtension();
+                        swal("Installing!", "Screenshare plugin is installing. Please reload the application after installation", "success");
+                    });
+                }
+            }
+            var screen_constraints = {
+                mandatory: {
+                    chromeMediaSource: DetectRTC.screen.chromeMediaSource,
+                    maxWidth: screen.width > 1920 ? screen.width : 1920,
+                    maxHeight: screen.height > 1080 ? screen.height : 1080
+                        // minAspectRatio: 1.77
+                },
+                optional: [{ // non-official Google-only optional constraints
+                    googTemporalLayeredScreencast: true
+                }, {
+                    googLeakyBucket: true
+                }]
+            };
+            // try to check if extension is installed.
+            if (isChrome && isWebRTCExperimentsDomain && typeof extensionAvailable == 'undefined' && DetectRTC.screen.chromeMediaSource != 'desktop') {
+                DetectRTC.screen.isChromeExtensionAvailable(function(available) {
+                    captureUserMedia(callback, available);
+                });
+                return;
+            }
+
+            if (isChrome && isWebRTCExperimentsDomain && DetectRTC.screen.chromeMediaSource == 'desktop' && !DetectRTC.screen.sourceId) {
+                DetectRTC.screen.getSourceId(function(error) {
+                    if (error && error == 'PermissionDeniedError') {
+                        $('#screen_share').show();
+                        alert('PermissionDeniedError: User denied to share content of his screen.');
+                    }
+
+                    captureUserMedia(callback);
+                });
+                return;
+            }
+
+            // for non-www.webrtc-experiment.com domains
+            if (isChrome && !isWebRTCExperimentsDomain && !DetectRTC.screen.sourceId) {
+                window.addEventListener('message', function(event) {
+                    if (event.data && event.data.chromeMediaSourceId) {
+                        var sourceId = event.data.chromeMediaSourceId;
+                        DetectRTC.screen.sourceId = sourceId;
+                        DetectRTC.screen.chromeMediaSource = 'desktop';
+                        if (sourceId == 'PermissionDeniedError') {
+                            $('#screen_share').show();
+                            return alert('User denied to share content of his screen.');
+                        }
+                        captureUserMedia(callback, true);
+                    }
+                    if (event.data && event.data.chromeExtensionStatus) {
+                        alert(event.data.chromeExtensionStatus);
+                        DetectRTC.screen.chromeMediaSource = 'screen';
+                        ///installed-disabled
+                        console.log(event.data.chromeExtensionStatus);
+                        if (event.data.chromeExtensionStatus != "not-installed") {
+                            captureUserMedia(callback, true);
+                        } else {
+                            if (browser_name == 'Chrome') {
+                                $('#screen_share').show();
+                                //var inst_html = '<button type="button" onclick="installPlugin()" class="blue-button">Click to Install</button>';
+                                //$("#modal").html("<h3>Message</h3> <p>You need to install chrome extension for screenshare. After installation reload the application.</p>"+inst_html).modal();
+                                swal({
+                                    title: "Plugin un available?",
+                                    text: "Screen share plugin is not installed in this browser!",
+                                    type: "warning",
+                                    showCancelButton: true,
+                                    confirmButtonColor: "#DD6B55",
+                                    confirmButtonText: "Install plugin",
+                                    closeOnConfirm: false
+                                }, function() {
+                                    installPlugin();
+                                    swal("Redirected!", "You are redirected to chrome extension page. Please reload the application after installation", "success");
+                                });
+                            } else {
+                                swal("Browser not support!", "Screen share is only supported in chrome and firefox")
+                                    //$("#modal").html("<h3>Message</h3> <p>Screen share is only supported in chrome and firefox</p>").modal();
+                                    //swal({   title: "Plugin un available?",   text: "Screen share plugin is not installed in this browser!",   type: "warning",   showCancelButton: true,   confirmButtonColor: "#DD6B55",   confirmButtonText: "Install plugin",   closeOnConfirm: false }, function(){installPlugin();swal("Installing!", "Screen share plugin will installed shortly. Please reload the application after completing installation.", "success"); });
+                            }
+
+                        }
+
+                    }
+                    //////console.log("scr-status="+event.data);
+                });
+                screenFrame.postMessage();
+                return;
+            }
+
+            if (isChrome && DetectRTC.screen.chromeMediaSource == 'desktop') {
+                screen_constraints.mandatory.chromeMediaSourceId = DetectRTC.screen.sourceId;
+            }
+
+            var constraints = {
+                audio: false,
+                video: screen_constraints
+            };
+
+            if (!!navigator.mozGetUserMedia) {
+                screen_constraints = {
+                    mozMediaSource: 'screen',
+                    mediaSource: 'screen',
+                    maxFrameRate: 1,
+                    width: {
+                        ideal: 640
+                    },
+                    height: {
+                        ideal: 360
+                    }
+                };
+                var constraints = {
+                    audio: false,
+                    video: screen_constraints
+                };
+
+            }
+
+            completed(constraints);
+
+            //////console.log( JSON.stringify( constraints , null, '\t') );
+        }
+
+        function installPlugin() {
+            //var win = window.open('https://chrome.google.com/webstore/detail/enable-screen-capturing-m/hngjcmfglajjgiakgifganehohegkioj', '_blank');
+            var win = window.open('https://chrome.google.com/webstore/detail/screen-capturing/ajhifddimkapgcifgcodmmfdlknahffk', '_blank');
+            win.focus();
+            // $("#install-button").trigger("click");
+        }
+
+        function installFirefoxScreenCapturingExtension() {
+            InstallTrigger.install({
+                'Foo': {
+                    URL: 'https://addons.mozilla.org/firefox/downloads/file/498439/mercury_minds-1.0.008-fx.xpi?src=dp-btn-primary',
+                    //URL: 'https://addons.mozilla.org/firefox/downloads/file/363432/enable_screen_capturing_in_firefox-1.0.007-fx.xpi?src=dp-btn-primary',
+                    toString: function() {
+                        return this.URL;
+                    }
+                }
+            });
+        }
+        /*
+         * screen share init
+         *
+         */
+        (function() {
+
+
+            var uniqueToken = document.getElementById('unique-token');
+            if (uniqueToken)
+                if (location.hash.length > 2) uniqueToken.parentNode.parentNode.parentNode.innerHTML = '<h2 style="text-align:center;"><a href="' + location.href + '" target="_blank">Share this link</a></h2>';
+                else uniqueToken.innerHTML = uniqueToken.parentNode.parentNode.href = '#' + (Math.random() * new Date().getTime()).toString(36).toUpperCase().replace(/\./g, '-');
+        })();
+
+        var Firefox_Screen_Capturing_Warning = 'Make sure that you are using Firefox Nightly and you enabled: media.getusermedia.screensharing.enabled flag from about:config page. You also need to add your domain in "media.getusermedia.screensharing.allowed_domains" flag.';
+
+        var screenFrame, loadedScreenFrame;
+
+        function loadScreenFrame(skip) {
+            if (loadedScreenFrame) return;
+            if (!skip) return loadScreenFrame(true);
+            loadedScreenFrame = true;
+            var iframe = document.createElement('iframe');
+            iframe.onload = function() {
+                iframe.isLoaded = true;
+                ////console.log('Screen Capturing frame is loaded.');
+
+            };
+            //iframe.src = 'assets/others/getSourceId.html';
+            iframe.src = 'https://www.webrtc-experiment.com/getSourceId/';
+            //iframe.src = protocol+domain+'/getSourceId.html';
+            iframe.style.display = 'none';
+            (document.body || document.documentElement).appendChild(iframe);
+            screenFrame = {
+                postMessage: function() {
+                    if (!iframe.isLoaded) {
+                        setTimeout(screenFrame.postMessage, 100);
+                        return;
+                    }
+                    ////console.log('Asking iframe for sourceId.');
+                    iframe.contentWindow.postMessage({
+                        captureSourceId: true
+                    }, '*');
+                }
+            };
+        };
+
+        if (!isWebRTCExperimentsDomain) {
+            loadScreenFrame();
+        }
+
+
+        // todo: need to check exact chrome browser because opera also uses chromium framework
+        var isChrome = !!navigator.webkitGetUserMedia;
+
+        // DetectRTC.js - https://github.com/muaz-khan/WebRTC-Experiment/tree/master/DetectRTC
+        // Below code is taken from RTCMultiConnection-v1.8.js (http://www.rtcmulticonnection.org/changes-log/#v1.8)
+        var DetectRTC = {};
+        // initScreen();
+        //function initScreen(){
+        (function() {
+
+            var screenCallback;
+            DetectRTC.screen = {
+                chromeMediaSource: 'screen',
+                getSourceId: function(callback) {
+                    if (!callback) throw '"callback" parameter is mandatory.';
+                    screenCallback = callback;
+                    window.postMessage('get-sourceId', '*');
+                },
+                isChromeExtensionAvailable: function(callback) {
+                    if (!callback) return;
+
+                    if (DetectRTC.screen.chromeMediaSource == 'desktop') return callback(true);
+
+                    // ask extension if it is available
+                    window.postMessage('are-you-there', '*');
+
+                    setTimeout(function() {
+                        if (DetectRTC.screen.chromeMediaSource == 'screen') {
+                            callback(false);
+                        } else callback(true);
+                    }, 2000);
+                },
+                onMessageCallback: function(data) {
+                    if (!(typeof data == 'string' || !!data.sourceId)) return;
+
+                    ////console.log('chrome message', data);
+
+                    // "cancel" button is clicked
+                    if (data == 'PermissionDeniedError') {
+                        DetectRTC.screen.chromeMediaSource = 'PermissionDeniedError';
+                        if (screenCallback) return screenCallback('PermissionDeniedError');
+                        else throw new Error('PermissionDeniedError');
+                    }
+                    // extension shared temp sourceId
+                    if (data.sourceId) {
+                        DetectRTC.screen.sourceId = data.sourceId;
+                        if (screenCallback) screenCallback(DetectRTC.screen.sourceId);
+                    }
+                },
+                getChromeExtensionStatus: function(callback) {
+                    if (!!navigator.mozGetUserMedia) return callback('not-chrome');
+                    //var extensionid = 'hngjcmfglajjgiakgifganehohegkioj';
+                    var extensionid = 'ajhifddimkapgcifgcodmmfdlknahffk';
+                    var image = document.createElement('img');
+                    image.src = 'chrome-extension://' + extensionid + '/icon.png';
+                    image.onload = function() {
+                        DetectRTC.screen.chromeMediaSource = 'screen';
+                        window.postMessage('are-you-there', '*');
+                        setTimeout(function() {
+                            if (!DetectRTC.screen.notInstalled) {
+                                callback('installed-enabled');
+                            }
+                        }, 5000);
+                    };
+                    image.onerror = function() {
+
+                        DetectRTC.screen.notInstalled = true;
+                        callback('not-installed');
+                    };
+                }
+            };
+
+            // check if desktop-capture extension installed.
+            if (window.postMessage && isChrome) {
+                DetectRTC.screen.isChromeExtensionAvailable();
+            }
+        })();
+
+        //}
+
+        DetectRTC.screen.getChromeExtensionStatus(function(status) {
+            if (status == 'installed-enabled') {
+                // alert('Extension installed');
+                DetectRTC.screen.chromeMediaSource = 'desktop';
+            }
+        });
+
+        window.addEventListener('message', function(event) {
+            if (event.origin != window.location.origin) {
+                return;
+            }
+
+            DetectRTC.screen.onMessageCallback(event.data);
+        });
+        var dom_arr = [];
+            dom_arr.push(protocol+domain);
+            dom_arr.push(domain);
+        window.postMessage({
+            enableScreenCapturing: true,
+            domains: dom_arr
+        }, "*");
+
+        // watch addon's response
+        // addon will return "enabledScreenCapturing=true" for success
+        // else "enabledScreenCapturing=false" for failure (i.e. user rejection)
+        window.addEventListener("message", function(event) {
+            var addonMessage = event.data;
+
+            if (!addonMessage || typeof addonMessage.enabledScreenCapturing === 'undefined') return;
+
+            if (addonMessage.enabledScreenCapturing === true) {
+                mozScreenshareAvailable = 1;
+            }
+        }, false);
+
+        /*
+         * get browser name
+         */
+        var isEdge = navigator.userAgent.indexOf('Edge') !== -1 && (!!navigator.msSaveOrOpenBlob || !!navigator.msSaveBlob);
+
+        function getBrowserInfo() {
+            var nVer = navigator.appVersion;
+            var nAgt = navigator.userAgent;
+            var browserName = navigator.appName;
+            var fullVersion = '' + parseFloat(navigator.appVersion);
+            var majorVersion = parseInt(navigator.appVersion, 10);
+            var nameOffset, verOffset, ix;
+            var screenshareok = 0;
+            // In Opera, the true version is after 'Opera' or after 'Version'
+            if ((verOffset = nAgt.indexOf('OPR')) !== -1) {
+                browserName = 'Opera';
+                fullVersion = nAgt.substring(verOffset + 6);
+
+                if ((verOffset = nAgt.indexOf('Version')) !== -1) {
+                    fullVersion = nAgt.substring(verOffset + 8);
+                }
+            }
+            // In MSIE, the true version is after 'MSIE' in userAgent
+            else if ((verOffset = nAgt.indexOf('MSIE')) !== -1) {
+                browserName = 'IE';
+                fullVersion = nAgt.substring(verOffset + 5);
+            }
+            // In Chrome, the true version is after 'Chrome' 
+            else if ((verOffset = nAgt.indexOf('Chrome')) !== -1) {
+                browserName = 'Chrome';
+                fullVersion = nAgt.substring(verOffset + 7);
+                screenshareok = 1;
+            }
+            // In Safari, the true version is after 'Safari' or after 'Version' 
+            else if ((verOffset = nAgt.indexOf('Safari')) !== -1) {
+                browserName = 'Safari';
+                fullVersion = nAgt.substring(verOffset + 7);
+
+                if ((verOffset = nAgt.indexOf('Version')) !== -1) {
+                    fullVersion = nAgt.substring(verOffset + 8);
+                }
+            }
+            // In Firefox, the true version is after 'Firefox' 
+            else if ((verOffset = nAgt.indexOf('Firefox')) !== -1) {
+                browserName = 'Firefox';
+                fullVersion = nAgt.substring(verOffset + 8);
+                screenshareok = 1;
+            }
+
+            // In most other browsers, 'name/version' is at the end of userAgent 
+            else if ((nameOffset = nAgt.lastIndexOf(' ') + 1) < (verOffset = nAgt.lastIndexOf('/'))) {
+                browserName = nAgt.substring(nameOffset, verOffset);
+                fullVersion = nAgt.substring(verOffset + 1);
+
+                if (browserName.toLowerCase() === browserName.toUpperCase()) {
+                    browserName = navigator.appName;
+                }
+            }
+
+            if (isEdge) {
+                browserName = 'Edge';
+                // fullVersion = navigator.userAgent.split('Edge/')[1];
+                fullVersion = parseInt(navigator.userAgent.match(/Edge\/(\d+).(\d+)$/)[2], 10);
+            }
+
+            // trim the fullVersion string at semicolon/space if present
+            if ((ix = fullVersion.indexOf(';')) !== -1) {
+                fullVersion = fullVersion.substring(0, ix);
+            }
+
+            if ((ix = fullVersion.indexOf(' ')) !== -1) {
+                fullVersion = fullVersion.substring(0, ix);
+            }
+
+            majorVersion = parseInt('' + fullVersion, 10);
+
+            if (isNaN(majorVersion)) {
+                fullVersion = '' + parseFloat(navigator.appVersion);
+                majorVersion = parseInt(navigator.appVersion, 10);
+            }
+            if (browserName == "Netscape") {
+                browserName = "Internet Explorer";
+            }
+
+            if (screenshareok == 0) {
+                // $('#screen-li').html('Screen share is only supported in chrome and firefox');
+            }
+            return {
+                fullVersion: fullVersion,
+                version: majorVersion,
+                name: browserName
+            };
+        }
+        browser_name = getBrowserInfo();
+        browser_name = browser_name.name;
+
+        function onChatUploadClick() {
+            $('#session_id_file-chat').val(room);
+            $('#uploadfile-file-chat').trigger('click');
+        }
+        /* Upload cancel button click */
+        $(".cancel-upload").on("click", function() {
+            if (jqXHR) {
+                jqXHR.abort();
+            }
+
+            $('.chatupload').hide();
+            $('.cancel-upload').hide();
+            $('.messageattach').show();
+            $("#upld-text").text("");
+            $('.progress').css('width', '0%');
+        });
+        /* Ajax file upload for chat */
+        $('document').ready(function(){
+            $('#chat_upload').fileupload({
+            dataType: 'JSON',
+            add: function(e, data) {
+                var fileSize = formatFileSize(data.files[0].size);
+                lession_fileName = data.files[0].name;
+                $("#org-file-name-chat").val(lession_fileName);
+                var split_filename = trimFileName(lession_fileName);
+                split_filename = split_filename.split(".");
+                var total_piece = split_filename.length;
+                var split_file = split_filename[0];
+                var currentdate = new Date();
+                var datetime = currentdate.getDate() + '-' + (currentdate.getMonth() + 1) + '-' + currentdate.getFullYear() + '-' + currentdate.getHours() + '-' + currentdate.getMinutes() + '-' + currentdate.getSeconds();
+                file_extension = split_filename[total_piece - 1].toLowerCase();
+                var uid = generateUUID();
+                var file_name_generated = uid + datetime;
+                file_name_generated = file_name_generated.replace(/\\/g, "");
+                $("#file-trans-file-name-chat").val(file_name_generated);
+                filesizeKb = (data.files[0].size) / 1024;
+                filesizeMb = (data.files[0].size) / (1024 * 1024);
+
+                //alert('size'+filesizeMb);
+                var sezeerror = '';
+                if (file_extension != 'exe') {
+                    if (filesizeMb > 2000) {
+                        sezeerror = 'File size should less than 5 mb';
+                    }
+                } else {
+                    sezeerror = "Invalid file format";
+                }
+                if (sezeerror != '') {
+                    swal("Message", sezeerror)
+                } else {
+                    jqXHR = data.submit();
+                }
+            },
+            progressall: function(e, data) {
+                $('.chatupload').show();
+                $('.messageattach').hide();
+                $('.cancel-upload').show();
+                var progress = parseInt(data.loaded / data.total * 100, 10);
+                $("#upld-text").text(lession_fileName.substr(0, 4) + "...." + file_extension + " Sending... " + progress + '%');
+                $('.progress').css('width', progress + '%');
+            },
+
+            done: function(event, data1) {
+                $('.chatupload').hide();
+                $("#upld-text").text("");
+                $('.progress').css('width', '0%');
+                $('.cancel-upload').hide();
+                $('.messageattach').show();
+            },
+            fail: function(e, data) {
+                $('#chatprogress .bar').css('width', '0%');
+                $('#chatprogress').css('background', '');
+                $('.cancel-upload').hide();
+            },
+            success: function(d) {
+                if (d.status == "success") {
+                    var orgname = d.orgname;
+                    var shortName = "",
+                        showSize = "";
+                    if (orgname.length > 20) {
+                        shortName = orgname.substr(0, 19);
+                    } else {
+                        shortName = orgname;
+                    }
+                    filesizeKb = (d.filesize) / 1024;
+                    filesizeMb = (d.filesize) / (1024 * 1024);
+                    if (filesizeMb.toFixed(2) == "0.00") {
+                        showSize = filesizeKb.toFixed(2) + " KB";
+                    } else {
+                        showSize = filesizeMb.toFixed(2) + " MB";
+                    }
+                    var ms = "<a tabindex='-1' style='float:left;' href='" + d.path + "' download='" + orgname + "'><i class='fa fa-download download-icon'></i></a><div style='float:left;margin-left:10px;width:85%'><span>" + shortName + "</span><span style='float:right;'>" + showSize + "</span></div>";
+                    //loadChat(userName,name,ms,current_chat_id,1,1);
+                    var toid = $('#toid').attr("data-toid");
+                    var to = 'Every one';
+                    var type = 'public';
+                    if (toid != 'public') {
+                        to = $('#toname').html();
+                        type = 'private';
+                    }
+                    loadChat('To', to, ms, type, toid, true);
+                } else if (d.message) {
+                    $("#upld-text").text(d.message);
+                }
+            },
+            error: function(jqXHR, textStatus, errorThrown) {
+                if (errorThrown === 'abort') {
+                    $("#upld-text").text("File share canceled");
+                }
+                $('#chatprogress .bar').css('width', '0%');
+                $('#chatprogress').css('background', '');
+                $('.cancel-upload').hide();
+            }
+
+        });
+        })
+        
+
+        function formatFileSize(bytes) {
+            if (typeof bytes !== 'number') {
+                return '';
+            }
+            if (bytes >= 1000000000) {
+                return (bytes / 1000000000).toFixed(2) + ' GB';
+            }
+            if (bytes >= 1000000) {
+                return (bytes / 1000000).toFixed(2) + ' MB';
+            }
+            return (bytes / 1000).toFixed(2) + ' KB';
+        }
+        /*
+         * Sanitize file name
+         * @return: sanitized file name
+         */
+        function trimFileName(file_name) {
+            var trimed_filename = file_name.split(' ').join('-');
+            trimed_filename = trimed_filename.split('&').join('-');
+            trimed_filename = trimed_filename.split(';').join('-');
+            trimed_filename = trimed_filename.split(':').join('-');
+            trimed_filename = trimed_filename.split('/').join('-');
+            trimed_filename = trimed_filename.split('{').join('-');
+            trimed_filename = trimed_filename.split('}').join('-');
+            trimed_filename = trimed_filename.split('(').join('-');
+            trimed_filename = trimed_filename.split(')').join('-');
+            trimed_filename = trimed_filename.split('\'').join('-');
+            trimed_filename = trimed_filename.split('"').join('-');
+            return trimed_filename;
+        }
+        $(function() {
+            var sampleTags = ['c++', 'java', 'php', 'coldfusion', 'javascript', 'asp', 'ruby', 'python', 'c', 'scala', 'groovy', 'haskell', 'perl', 'erlang', 'apl', 'cobol', 'go', 'lua'];
+            $('#myTags').tagit();
+            var eventTags = $('#eventTags');
+            var addEvent = function(text) {
+                alert(text);
+                $('#events_container').append(text + '<br>');
+
+            };
+            eventTags.tagit({
+                availableTags: sampleTags,
+                beforeTagAdded: function(evt, ui) {
+                    if (!ui.duringInitialization) {
+                        addEvent('beforeTagAdded: ' + eventTags.tagit('tagLabel', ui.tag));
+                    }
+                },
+                afterTagAdded: function(evt, ui) {
+                    if (!ui.duringInitialization) {
+                        alert('added' + eventTags.tagit('tagLabel', ui.tag));
+                        addEvent('afterTagAdded: ' + eventTags.tagit('tagLabel', ui.tag));
+                    }
+                },
+                beforeTagRemoved: function(evt, ui) {
+                    addEvent('beforeTagRemoved: ' + eventTags.tagit('tagLabel', ui.tag));
+                },
+                afterTagRemoved: function(evt, ui) {
+                    addEvent('afterTagRemoved: ' + eventTags.tagit('tagLabel', ui.tag));
+                },
+                onTagClicked: function(evt, ui) {
+                    addEvent('onTagClicked: ' + eventTags.tagit('tagLabel', ui.tag));
+                },
+                onTagExists: function(evt, ui) {
+                    addEvent('onTagExists: ' + eventTags.tagit('tagLabel', ui.existingTag));
+                }
+            });
+
+
+        });
+
+        function copyToClipboard(elem) {
+            var targetId = "_hiddenCopyText_";
+            var isInput = elem.tagName === "INPUT" || elem.tagName === "TEXTAREA";
+            var origSelectionStart, origSelectionEnd;
+            if (isInput) {
+                // can just use the original source element for the selection and copy
+                target = elem;
+                origSelectionStart = elem.selectionStart;
+                origSelectionEnd = elem.selectionEnd;
+            } else {
+                target = document.getElementById(targetId);
+                if (!target) {
+                    var target = document.createElement("textarea");
+                    target.style.position = "absolute";
+                    target.style.left = "-9999px";
+                    target.style.top = "0";
+                    target.id = targetId;
+                    document.body.appendChild(target);
+                }
+                target.textContent = elem.textContent;
+            }
+            // select the content
+            var currentFocus = document.activeElement;
+            target.focus();
+            target.setSelectionRange(0, target.value.length);
+
+            // copy the selection
+            var succeed;
+            try {
+                succeed = document.execCommand("copy");
+            } catch (e) {
+                succeed = false;
+            }
+            // restore original focus
+            if (currentFocus && typeof currentFocus.focus === "function") {
+                currentFocus.focus();
+            }
+
+            if (isInput) {
+                // restore prior selection
+                elem.setSelectionRange(origSelectionStart, origSelectionEnd);
+            } else {
+                // clear temporary content
+                target.textContent = "";
+            }
+            return succeed;
+        }
+
+
+        function storeHistoryData(data) {
+            var prevdata = localStorage.getItem("history_" + room);
+            if (prevdata) {
+                localStorageArray = JSON.parse(prevdata);
+            }
+            localStorageArray[data.action] = data;
+            var dataJson = JSON.stringify(localStorageArray);
+            if (typeof(Storage) !== "undefined") {
+                // Code for localStorage/sessionStorage.
+                localStorage.setItem("history_" + room, dataJson);
+                if (mode == 'presenter') {
+                    var data = {
+                        id: "saveHistoryData",
+                        room: room,
+                        data: dataJson
+                    };
+                    sendMessage(data);
+                }
+
+
+            } else {
+                // Sorry! No Web Storage support..
+                alert('notsupport');
+            }
+            //alert(dataJson);
+        }
+
+        function loadInitialData(histroyJson) {
+            if (histroyJson) {
+                var histObj = JSON.parse(histroyJson);
+                for (var key in histObj) {
+                    var dataval = histObj[key];
+                    //alert(JSON.stringify(dataval));
+                    switch (key) {
+                        case 'module':
+                            if (dataval.module == 'wb') {
+                                onModuleChange('wb', false);
+                            } else {
+                                onModuleChange('video', false);
+                            }
+                            break;
+                        case 'board':
+                            if (dataval.histArray) {
+                                histArray = JSON.parse(dataval.histArray);
+                            }
+                            if (dataval.histSave) {
+                                histSave = JSON.parse(dataval.histArray);
+                            }
+                            if (dataval.histCount) {
+                                histCount = JSON.parse(dataval.histCount);
+                            }
+                            recreateDrawings();
+                            break;
+                        default:
+                            console.log('Unrecognized key', key);
+                    }
+                }
+            }
+
+        }
+
+        function loadHistory() {
+            var histroyJson = localStorage.getItem("history_" + room);
+            if (histroyJson) {
+                var histObj = JSON.parse(histroyJson);
+                for (var key in histObj) {
+                    var dataval = histObj[key];
+                    //alert(JSON.stringify(dataval));
+                    switch (key) {
+                        case 'module':
+                            if (dataval.module == 'wb') {
+                                onModuleChange('wb', false);
+                            } else {
+                                onModuleChange('video', false);
+                            }
+                            break;
+                        case 'chat':
+                            if (dataval.html) {
+                                $('#chat_list').html(dataval.html);
+                                $("#chat_list").scrollTop($("#chat_list").prop("scrollHeight"));
+                            }
+                            break;
+                        case 'board':
+                            if (dataval.histArray) {
+                                histArray = JSON.parse(dataval.histArray);
+                            }
+                            if (dataval.histSave) {
+                                histSave = JSON.parse(dataval.histArray);
+                            }
+                            if (dataval.histCount) {
+                                histCount = JSON.parse(dataval.histCount);
+                            }
+                            recreateDrawings();
+                            break;
+                        default:
+                            console.log('Unrecognized key', key);
+                    }
+                }
+            }
+
+        }
+
+        function showNotifiction(txt) {
+            $('.not-txt').html(txt);
+            if ($(document).width() < 600) {
+                $('.green-not').animate({
+                    height: "55"
+                });
+            } else {
+                $('.green-not').animate({
+                    height: "35"
+                });
+            }
+
+            $('.not-txt').show();
+            setTimeout(function hidenot() {
+                $('.green-not').animate({
+                    height: "0"
+                });
+                $('.not-txt').hide();
+            }, 3000)
+        }
+
+        /*
+* for playing chat sound
+*/
+function PlaySound() {
+  var snd = document.getElementById('not-snd');
+  snd.play();
+}
+document.addEventListener('DOMContentLoaded', function () {
+  if (!Notification) {
+    alert('Desktop notifications not available in your browser. Try Chromium.'); 
+    return;
+  }
+
+  if (Notification.permission !== "granted")
+    Notification.requestPermission();
+});
+function notifyMe(chatuser,msg) {
+    if (msg.indexOf('fa-download') > -1) {
+        return;                  
+    }
+    if(focus == 1){
+        return;
+    }
+  if (Notification.permission !== "granted")
+    Notification.requestPermission();
+  else {
+    var notification = new Notification('Message from '+chatuser, {
+      icon: 'https://wc-io.ezeassist.com/assets/images/logo-collapsed2.png',
+      body: msg,
+    });
+
+    notification.onclick = function () {
+      //window.open("");      
+    };
+
+  }
+
+}
+
+
+function strftime(sFormat, date) {
+  if (!(date instanceof Date)) date = new Date();
+  var nDay = date.getDay(),
+    nDate = date.getDate(),
+    nMonth = date.getMonth(),
+    nYear = date.getFullYear(),
+    nHour = date.getHours(),
+    aDays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    aMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+    aDayCount = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334],
+    isLeapYear = function() {
+      if (nYear&3!==0) return false;
+      return nYear%100!==0 || year%400===0;
+    },
+    getThursday = function() {
+      var target = new Date(date);
+      target.setDate(nDate - ((nDay+6)%7) + 3);
+      return target;
+    },
+    zeroPad = function(nNum, nPad) {
+      return ('' + (Math.pow(10, nPad) + nNum)).slice(1);
+    };
+  return sFormat.replace(/%[a-z]/gi, function(sMatch) {
+    return {
+      '%a': aDays[nDay].slice(0,3),
+      '%A': aDays[nDay],
+      '%b': aMonths[nMonth].slice(0,3),
+      '%B': aMonths[nMonth],
+      '%c': date.toUTCString(),
+      '%C': Math.floor(nYear/100),
+      '%d': zeroPad(nDate, 2),
+      '%e': nDate,
+      '%F': date.toISOString().slice(0,10),
+      '%G': getThursday().getFullYear(),
+      '%g': ('' + getThursday().getFullYear()).slice(2),
+      '%H': zeroPad(nHour, 2),
+      '%I': zeroPad((nHour+11)%12 + 1, 2),
+      '%j': zeroPad(aDayCount[nMonth] + nDate + ((nMonth>1 && isLeapYear()) ? 1 : 0), 3),
+      '%k': '' + nHour,
+      '%l': (nHour+11)%12 + 1,
+      '%m': zeroPad(nMonth + 1, 2),
+      '%M': zeroPad(date.getMinutes(), 2),
+      '%p': (nHour<12) ? 'AM' : 'PM',
+      '%P': (nHour<12) ? 'am' : 'pm',
+      '%s': Math.round(date.getTime()/1000),
+      '%S': zeroPad(date.getSeconds(), 2),
+      '%u': nDay || 7,
+      '%V': (function() {
+              var target = getThursday(),
+                n1stThu = target.valueOf();
+              target.setMonth(0, 1);
+              var nJan1 = target.getDay();
+              if (nJan1!==4) target.setMonth(0, 1 + ((4-nJan1)+7)%7);
+              return zeroPad(1 + Math.ceil((n1stThu-target)/604800000), 2);
+            })(),
+      '%w': '' + nDay,
+      '%x': date.toLocaleDateString(),
+      '%X': date.toLocaleTimeString(),
+      '%y': ('' + nYear).slice(2),
+      '%Y': nYear,
+      '%z': date.toTimeString().replace(/.+GMT([+-]\d+).+/, '$1'),
+      '%Z': date.toTimeString().replace(/.+\((.+?)\)$/, '$1')
+    }[sMatch] || sMatch;
+  });
+}
+
+/*
+Role Change
+*/
+
+function onReceiveRollchange(parsedMessage)
+{   
+    if(parsedMessage.room == room)
+    {
+        if(parsedMessage.receiversocket==socketId)
+        {
+             if(parsedMessage.assignedmode){ togglePresenter(parsedMessage.assignedmode, parsedMessage.receiversocket, parsedMessage.sendersocket); }
+        }
+    }
+}
+
+function assignPresenter(id){
+         
+         assignRole(false, 'presenter', id, false, 'viewer');
+         togglePresenter('viewer', socketId, id);
+
+}
+/*
+   function for sending roll change to all
+*/
+function assignRole(assignedrole,assignedmode,receiverid,senderrole,sendermode)
+{
+    var message = {
+        id : 'asignRole',
+        receiversocket : receiverid,
+        sendersocket : socketId,
+        assignedrole : assignedrole,
+        assignedmode : assignedmode,
+        senderrole   : senderrole,
+        sendermode   : sendermode,
+        room : room
+    };
+    sendMessage(message);
+
+}
+/*
+toggleing presenter and viewer views
+*/
+function togglePresenter(modeParam, receiversocket, sendersocket) {
+    //alert(modeParam+' // '+receiversocket+' // '+sendersocket);
+    var x, i;
+    if(modeParam=='presenter')
+    {
+        $('#presenter-'+receiversocket).hide();
+        $('.preslab-'+receiversocket).html('(Host)');
+        $('#presenter-'+sendersocket).html('');
+        $('.hideforviewer').show();
+        $('#leaveMeeting').hide();
+        $('#endMsg').html('Are you sure to end this meeting ? , so that all users will be disconnected from the room');
+        $('.viewerdropht').css('top', '0px');
+        $('#share_conf').show(); 
+    }
+    else
+    {
+        $('#presenter-'+sendersocket).hide(); 
+        $('.preslab-'+sendersocket).html('(Host)');
+        $('.preslab-'+receiversocket).html('');
+        $('.hideforviewer').hide();
+        $('#endMsg').html('Are you sure to leave from the current meeting ?');
+        $('.viewerdropht').css('top', '-110px');
+        $('#share_conf').hide();       
+    }
+    mode = modeParam;
+    switching = true;
+}
+
+function isIframe(){
+    if(parent.location.href == self.location.href) {
+      return false;
+    }
+    else {
+       return true;
+    }
+}
+window.onbeforeunload = function(){
+    return "Are you sure to leave from the current meeting ?"
+}

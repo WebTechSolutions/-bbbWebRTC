@@ -1,0 +1,163 @@
+ header {
+    width: 100%;
+    background-color: #3e5c6e;
+    height: 80px;
+    border-bottom: 1px solid #d5d5d5;
+    vertical-align: middle;
+  }
+  body{
+    font-family: Arial;
+    margin: 0px;
+    background-color: #fff !important;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+  .heading{
+    font-family: Arial;
+    font-weight: bold;
+    font-size: 24px;
+    margin-left: 30px;
+    color: #fff;
+    padding-top: 23px;
+  }
+  .userName{
+    float: left;
+    width: 60px;
+    margin-right: 3px;
+  }
+   #layout {
+        position: absolute;
+        background-color: #fff;
+        top: 97px;
+        left: 260px;
+        right: 0px;
+        bottom: 44px;
+    }
+  #myvideo {
+        position: absolute;
+        background-color: #000;
+        height: 240px;
+        width: 320px;
+        right: 0px;
+        bottom: 44px;
+        
+    }
+  footer {
+    width: 100%;
+    background-color: #fff;
+    height: 44px;
+    border-top: 1px solid #d5d5d5;
+    position: absolute;
+    bottom: 0px;
+  }
+  .live {
+    width: auto;
+    height: auto;
+    float: left;
+    font-size: 12px;
+    color: #ff0000;
+    text-transform: uppercase;
+    margin-top: 15px;
+    margin-left: 20px;
+  }
+  .off{color: red !important}
+  .online{ margin-left:20px;width:12px; height:12px; border-radius:50%; background-color:#40c012; float:left; margin:17px 5px 0 5px;}
+  .offline{ background-color:red !important;}
+  .stop-session {
+    background-color: #3e5c6e;
+    border-radius: 3px;
+    bottom: 10px;
+    color: #fff;
+    cursor: pointer;
+    float: right;
+    font-size: 14px;
+    letter-spacing: normal;
+    margin-top: -2px;
+    padding: 2px 6px;
+    position: fixed;
+    right: 20px;
+    visibility: visible;
+  }
+  .invite-session {
+    background-color: #3e5c6e;
+    border-radius: 3px;
+    bottom: 10px;
+    color: #fff;
+    cursor: pointer;
+    float: right;
+    font-size: 14px;
+    letter-spacing: normal;
+    margin-top: -2px;
+    padding: 2px 6px;
+    position: fixed;
+    right: 140px;
+    visibility: none;
+  }
+  .add-participant{
+    background-color: #3e5c6e;
+    border-radius: 3px;
+    bottom: 10px;
+    color: #fff;
+    cursor: pointer;
+    float: right;
+    font-size: 14px;
+    letter-spacing: normal;
+    margin-top: -2px;
+    padding: 2px 6px;
+    position: fixed;
+    right: 140px;
+    visibility: visible;
+  }
+  video{
+    padding: 3px !important;
+  }
+  .video-contrl{
+    height: 20px;
+    width: 220px;
+    margin:0 auto;
+    left: 10px;
+    right: 10px;
+    top: 5px;
+    text-align: center;
+    cursor: pointer;
+  }
+  .video-contrl-my{
+    width: 140px !important;
+  }
+  .hide-vid{
+    opacity: 0;
+  }
+  .show-vid{
+    opacity: 1;
+  }
+  .vid-parent{
+    border:1px solid #ccc;
+    float: left;
+    margin-left: 10px;
+  }
+  .control-back{
+    background-color: #337ab7;
+    top: -17px;
+    left: -1px;
+    right: -1px;
+	color:#fff;
+  }
+  .chat-vid{
+    width: 35px;
+    float: left;
+    cursor: pointer;
+  }
+  .chat-mic{
+    width: 55px;
+    float: left;
+    cursor: pointer;
+  }
+  #elapsedtime{
+    visibility: visible!important;
+    letter-spacing: normal!important;
+    float: left;
+    margin-left: 13px;
+    margin-top: 12px;
+    font-weight: bold;
+}
